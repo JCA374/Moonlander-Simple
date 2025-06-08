@@ -14,20 +14,27 @@ def train_moonlander():
     
     agent = DQNAgent(state_size, action_size)
     
+    # Create models folder if it doesn't exist
+    models_dir = 'models'
+    os.makedirs(models_dir, exist_ok=True)
+    
     # Load the best model if it exists
     best_model_path = 'moonlander_best.pth'
     if os.path.exists(best_model_path):
         print(f"Loading previous best model from {best_model_path}")
         agent.load(best_model_path)
+        episodes_input = input("How many episodes to train? (default 25000): ").strip()
+        episodes = int(episodes_input) if episodes_input else 25000
     else:
         print("No previous best model found, starting from scratch")
+        episodes = 25000
     
     reward_shaper = ImprovedRewardShaper()
     logger = TrainingLogger()
     
     # Log training configuration
     logger.log_config({
-        "episodes": 5000,
+        "episodes": episodes,
         "state_size": state_size,
         "action_size": action_size,
         "learning_rate": agent.learning_rate,
@@ -36,8 +43,6 @@ def train_moonlander():
         "epsilon_decay": agent.epsilon_decay,
         "reward_shaping": True
     })
-    
-    episodes = 25000  # Longer training for better convergence
     scores = []
     scores_window = []
     
@@ -135,7 +140,8 @@ def train_moonlander():
         
         # Save checkpoint periodically
         if episode > 0 and episode % 2000 == 0:
-            agent.save(f'moonlander_checkpoint_{episode}.pth')
+            checkpoint_path = os.path.join(models_dir, f'moonlander_checkpoint_{episode}.pth')
+            agent.save(checkpoint_path)
             logger.log_milestone(episode, f"Checkpoint saved at episode {episode}")
             
         if np.mean(scores_window) >= 200:

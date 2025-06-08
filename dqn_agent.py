@@ -79,8 +79,25 @@ class DQNAgent:
         return loss.item(), q_variance
             
     def save(self, filename):
-        torch.save(self.q_network.state_dict(), filename)
+        torch.save({
+            'q_network_state_dict': self.q_network.state_dict(),
+            'epsilon': self.epsilon,
+            'optimizer_state_dict': self.optimizer.state_dict()
+        }, filename)
         
     def load(self, filename):
-        self.q_network.load_state_dict(torch.load(filename))
+        checkpoint = torch.load(filename)
+        
+        # Handle both old and new save formats
+        if isinstance(checkpoint, dict) and 'q_network_state_dict' in checkpoint:
+            # New format
+            self.q_network.load_state_dict(checkpoint['q_network_state_dict'])
+            if 'epsilon' in checkpoint:
+                self.epsilon = checkpoint['epsilon']
+            if 'optimizer_state_dict' in checkpoint:
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        else:
+            # Old format - just the state dict
+            self.q_network.load_state_dict(checkpoint)
+            
         self.update_target_network()
