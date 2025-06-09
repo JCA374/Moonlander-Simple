@@ -8,34 +8,52 @@ from collections import deque
 class DQN(nn.Module):
     def __init__(self, state_size, action_size):
         super(DQN, self).__init__()
+        self.action_size = action_size
+        
+        # Shared feature layers
         self.fc1 = nn.Linear(state_size, 64)
         self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, action_size)
+        
+        # Dueling streams
+        self.value_stream = nn.Linear(64, 1)
+        self.advantage_stream = nn.Linear(64, action_size)
         
     def forward(self, x):
+        # Shared features
         x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
+        features = torch.relu(self.fc2(x))
+        
+        # Dueling streams
+        value = self.value_stream(features)
+        advantage = self.advantage_stream(features)
+        
+        # Combine: Q(s,a) = V(s) + (A(s,a) - mean(A(s)))
+        q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
+        return q_values
 
 class DQNAgent:
-    def __init__(self, state_size, action_size, lr=0.0003):
+    def __init__(self, state_size, action_size, lr=0.0003, target_update=500, tau=0.001):
         self.state_size = state_size
         self.action_size = action_size
-        self.memory = deque(maxlen=50000)  # Much larger memory for longer training
+        self.memory = deque(maxlen=50000)
         self.epsilon = 1.0
-        self.epsilon_min = 0.1  # Even higher minimum to prevent hovering exploitation
-        self.epsilon_decay = 0.9998  # Slower decay for longer exploration
+        self.epsilon_min = 0.02  # Lower minimum for more greedy behavior
+        self.epsilon_decay = 0.995  # Faster decay - reach min in ~1000 episodes
         self.learning_rate = lr
         self.device = torch.device("cpu")
         
         self.q_network = DQN(state_size, action_size).to(self.device)
         self.target_network = DQN(state_size, action_size).to(self.device)
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=lr)
+        # soft update parameter
+        self.tau = tau
         
         self.update_target_network()
         
     def update_target_network(self):
-        self.target_network.load_state_dict(self.q_network.state_dict())
+        # Soft update: θ_target = τ * θ_local + (1 - τ) * θ_target
+        for target_param, local_param in zip(self.target_network.parameters(), self.q_network.parameters()):
+            target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
         
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
@@ -48,7 +66,7 @@ class DQNAgent:
         q_values = self.q_network(state_tensor)
         return np.argmax(q_values.cpu().data.numpy())
         
-    def replay(self, batch_size=32):
+    def replay(self, batch_size=64):
         if len(self.memory) < batch_size:
             return None, None
             
@@ -60,14 +78,20 @@ class DQNAgent:
         dones = torch.BoolTensor([e[4] for e in batch]).to(self.device)
         
         current_q_values = self.q_network(states).gather(1, actions.unsqueeze(1))
-        next_q_values = self.target_network(next_states).max(1)[0].detach()
-        target_q_values = rewards + (0.99 * next_q_values * ~dones)
+        # Double DQN: select next actions via online net, evaluate via target net
+        with torch.no_grad():
+            next_actions = self.q_network(next_states).argmax(dim=1, keepdim=True)
+            next_q = self.target_network(next_states).gather(1, next_actions).squeeze()
+        target_q_values = rewards + (0.99 * next_q * ~dones)
         
         loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
         
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        
+        # Soft update target network every step
+        self.update_target_network()
         
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay

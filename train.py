@@ -7,12 +7,19 @@ from improved_reward_shaper import ImprovedRewardShaper
 from logger import TrainingLogger
 from evaluator import quick_evaluate
 
+import torch
+torch.set_num_threads(4)   # or torch.get_num_threads() // 2
+
+
 def train_moonlander():
-    env = gym.make('LunarLander-v2')
+    from gymnasium.wrappers import TimeLimit
+    base_env = gym.make('LunarLander-v2')
+    env = TimeLimit(base_env, max_episode_steps=1000)
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
     
-    agent = DQNAgent(state_size, action_size)
+    # pass in soft update tau parameter
+    agent = DQNAgent(state_size, action_size, tau=0.001)
     
     # Create models folder if it doesn't exist
     models_dir = 'models'
@@ -28,6 +35,10 @@ def train_moonlander():
     else:
         print("No previous best model found, starting from scratch")
         episodes = 25000
+    
+    # add step learning-rate scheduler - halve LR every 5000 episodes  
+    from torch.optim.lr_scheduler import StepLR
+    scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
     
     reward_shaper = ImprovedRewardShaper()
     logger = TrainingLogger()
@@ -60,7 +71,9 @@ def train_moonlander():
         hover_penalty = 0
         actions_taken = []
         
-        for step in range(500):
+        # let the wrapper (or default) dictate max steps
+        max_steps = env.spec.max_episode_steps
+        for step in range(max_steps):
             action = agent.act(state)
             actions_taken.append(action)
             next_state, reward, terminated, truncated, _ = env.step(action)
@@ -72,7 +85,7 @@ def train_moonlander():
                 fuel_used += 1
                 
             # Apply reward shaping
-            shaped_reward = reward_shaper.shape_reward(state, action, reward, done, step)
+            shaped_reward = reward_shaper.shape_reward(state, action, reward, done, step, terminated, truncated)
             
             # No hover penalty tracking for simple shaper
             
@@ -85,8 +98,12 @@ def train_moonlander():
                 
         # Training step with logging
         loss, q_variance = agent.replay()
-        if loss is not None:
+        # Log training stats only every 10 episodes
+        if loss is not None and episode % 10 == 0:
             logger.log_training_step(loss, q_variance)
+        # step the LR scheduler once per episode
+        scheduler.step()
+
         
         if episode % 100 == 0:  # Less frequent target updates for stability
             agent.update_target_network()
@@ -94,13 +111,13 @@ def train_moonlander():
         # Check if landing was successful
         landing_success = terminated and next_state[6] and next_state[7]  # Both legs touching
         
+
         # Log episode data
+        # Drop per-step lists and hover_penalty to save memory & I/O
         logger.log_episode(episode, total_reward, agent.epsilon, step + 1, {
             "original_reward": original_reward,
             "landing_success": landing_success,
-            "hover_penalty": 0,  # Not tracked in simple shaper
             "fuel_used": fuel_used,
-            "actions_taken": actions_taken,
             "loss": loss if loss is not None else 0,
             "q_variance": q_variance if q_variance is not None else 0
         })
@@ -144,10 +161,6 @@ def train_moonlander():
             agent.save(checkpoint_path)
             logger.log_milestone(episode, f"Checkpoint saved at episode {episode}")
             
-        if np.mean(scores_window) >= 200:
-            logger.log_milestone(episode, f"Environment solved! Average score: {np.mean(scores_window):.2f}")
-            agent.save('moonlander_dqn.pth')
-            break
             
     # Save the final model
     if episode == episodes - 1:
