@@ -11,6 +11,22 @@ import torch
 torch.set_num_threads(4)   # or torch.get_num_threads() // 2
 
 
+def debug_model_saving(episode, eval_score, true_landing_rate, best_eval_score, best_landing_rate):
+    """Debug why models are or aren't being saved"""
+    print(f"🔍 Model Saving Debug (Episode {episode}):")
+    print(f"   Current: Score={eval_score:.2f}, Landing Rate={true_landing_rate*100:.1f}%")
+    print(f"   Best:    Score={best_eval_score:.2f}, Landing Rate={best_landing_rate*100:.1f}%")
+    print(f"   Score improved: {eval_score > best_eval_score}")
+    print(f"   Landing rate improved: {true_landing_rate > best_landing_rate}")
+    
+    if true_landing_rate > best_landing_rate:
+        print("   ✅ SHOULD SAVE: Landing rate improved")
+    elif true_landing_rate == best_landing_rate and eval_score > best_eval_score + 10:
+        print("   ✅ SHOULD SAVE: Score improved significantly")
+    else:
+        print("   ❌ NO SAVE: No significant improvement")
+
+
 def train_moonlander():
     from gymnasium.wrappers import TimeLimit
     base_env = gym.make('LunarLander-v2')
@@ -30,24 +46,27 @@ def train_moonlander():
     if os.path.exists(best_model_path):
         print(f"Loading previous best model from {best_model_path}")
         agent.load(best_model_path)
-        # Force exploration of new strategies
         agent.epsilon = 0.6
         agent.epsilon_decay = 0.9995
         episodes_input = input("How many episodes to train? (default 25000): ").strip()
         episodes = int(episodes_input) if episodes_input else 25000
         
-        # Get baseline evaluation of loaded model to prevent immediate overwrite
+        # Get baseline evaluation of loaded model
         print("Evaluating loaded model to establish baseline...")
         current_epsilon = agent.epsilon
-        agent.epsilon = 0  # No exploration during evaluation
+        agent.epsilon = 0
         baseline_score, baseline_rate = quick_evaluate(agent)
-        agent.epsilon = current_epsilon  # Restore epsilon
-        print(f"Loaded model baseline: Score {baseline_score:.2f}, Landing rate: {baseline_rate*100:.1f}%")
+        agent.epsilon = current_epsilon
+        
+        # Set baselines for comparison
+        best_eval_score = baseline_score
+        best_landing_rate = baseline_rate
+        print(f"Baseline established - Score: {baseline_score:.2f}, Landing rate: {baseline_rate*100:.1f}%")
     else:
         print("No previous best model found, starting from scratch")
         episodes = 25000
-        baseline_score = float('-inf')  # No baseline for new training
-        baseline_rate = 0.0  # No baseline landing rate for new training
+        best_eval_score = float('-inf')
+        best_landing_rate = 0.0
     
     # add step learning-rate scheduler - halve LR every 5000 episodes  
     from torch.optim.lr_scheduler import StepLR
@@ -70,9 +89,7 @@ def train_moonlander():
     scores = []
     scores_window = []
     
-    # Best model tracking
-    best_eval_score = baseline_score  # Use baseline from loaded model or -inf for new training
-    best_landing_rate = baseline_rate  # Track true landing rate
+    # Best model tracking - variables already set above
     episodes_since_best = 0
     
     for episode in range(episodes):
@@ -194,32 +211,58 @@ def train_moonlander():
             print(f"  Outside pad failures: {outside_pad_failures}/100")  # Key insight
             print(f"  Epsilon: {agent.epsilon:.3f}")
             
-        # 6. EVALUATION: Use true_success for model saving decisions
-        if episode % 200 == 0:  # Evaluate every 200 episodes including episode 0
-            print(f"Running evaluation at episode {episode}...")
+        # 6. EVALUATION: Use consistent criteria for model saving
+        if episode > 0 and episode % 200 == 0:
             current_epsilon = agent.epsilon
             agent.epsilon = 0
             
-            eval_score, true_landing_rate = quick_evaluate(agent)  # Make sure quick_evaluate uses true_success too
+            eval_score, true_landing_rate = quick_evaluate(agent)
             agent.epsilon = current_epsilon
             
-            # Save best model based on TRUE landing rate, not both_legs_touching
-            if true_landing_rate > best_landing_rate:  # Track best TRUE landing rate
-                print(f"NEW BEST MODEL! Previous best: {best_landing_rate*100:.1f}%, Current: {true_landing_rate*100:.1f}%")
+            # Debug the decision process
+            debug_model_saving(episode, eval_score, true_landing_rate, best_eval_score, best_landing_rate)
+            
+            # Define what makes a "better" model - prioritize landing rate, then score
+            is_better_model = False
+            improvement_reason = ""
+            
+            if true_landing_rate > best_landing_rate:
+                # Landing rate improved - always save
+                is_better_model = True
+                improvement_reason = f"Landing rate: {best_landing_rate*100:.1f}% -> {true_landing_rate*100:.1f}%"
+            elif true_landing_rate == best_landing_rate and eval_score > best_eval_score:
+                # Same landing rate but better score - save if score improved significantly
+                if eval_score > best_eval_score + 10:  # Significant improvement threshold
+                    is_better_model = True
+                    improvement_reason = f"Score: {best_eval_score:.1f} -> {eval_score:.1f} (same landing rate)"
+            
+            if is_better_model:
+                # Backup existing best model
+                import shutil
+                if os.path.exists('moonlander_best.pth'):
+                    shutil.copy('moonlander_best.pth', f'moonlander_best_backup_{episode}.pth')
+                
                 best_landing_rate = true_landing_rate
+                best_eval_score = eval_score
                 episodes_since_best = 0
                 agent.save('moonlander_best.pth')
-                logger.log_milestone(episode, f"NEW BEST MODEL! True landing rate: {true_landing_rate*100:.1f}%")
+                logger.log_milestone(episode, f"NEW BEST MODEL! {improvement_reason}")
+                print(f"🎯 NEW BEST MODEL! {improvement_reason}")
             else:
                 episodes_since_best += 200
                 
-            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings: {true_landing_rate*100:.1f}%, Best Rate: {best_landing_rate*100:.1f}%")
+            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings {true_landing_rate*100:.1f}%, Best Rate: {best_landing_rate*100:.1f}%")
         
         # Save checkpoint periodically
         if episode > 0 and episode % 2000 == 0:
             checkpoint_path = os.path.join(models_dir, f'moonlander_checkpoint_{episode}.pth')
             agent.save(checkpoint_path)
             logger.log_milestone(episode, f"Checkpoint saved at episode {episode}")
+            
+        # Force save every 5000 episodes regardless
+        if episode % 5000 == 0:
+            agent.save(f'moonlander_checkpoint_{episode}.pth')
+            print(f"Checkpoint saved at episode {episode}")
             
             
     # Save the final model

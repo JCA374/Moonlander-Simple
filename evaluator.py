@@ -61,7 +61,11 @@ def quick_evaluate(agent, episodes=5):
 
     # Return shaped score and true landing rate for compatibility
     # But also print more info
-    print(
-        f"  Original score: {avg_original_score:.2f}, True landings: {true_landing_rate*100:.1f}%, Both legs: {both_legs_rate*100:.1f}%")
+    print(f"  Evaluation details:")
+    print(f"    Shaped scores: {scores}")
+    print(f"    Original scores: {original_scores}")
+    print(f"    True landings: {true_landings}/{episodes}")
+    print(f"    Both legs landings: {both_legs_landings}/{episodes}")
+    print(f"  Original score: {avg_original_score:.2f}, True landings: {true_landing_rate*100:.1f}%, Both legs: {both_legs_rate*100:.1f}%")
 
     return avg_shaped_score, true_landing_rate
