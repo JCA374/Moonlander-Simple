@@ -108,8 +108,14 @@ def train_moonlander():
         if episode % 100 == 0:  # Less frequent target updates for stability
             agent.update_target_network()
             
-        # Check if landing was successful
-        landing_success = terminated and next_state[6] and next_state[7]  # Both legs touching
+        # Check if landing was successful - FIXED VERSION
+        # Game's definition: terminated with positive reward
+        true_landing_success = terminated and reward > 0
+        # Your current metric: both legs touching
+        both_legs_touching = terminated and next_state[6] and next_state[7]
+        
+        # Use the game's definition for logging
+        landing_success = true_landing_success
         
 
         # Log episode data
@@ -117,6 +123,7 @@ def train_moonlander():
         logger.log_episode(episode, total_reward, agent.epsilon, step + 1, {
             "original_reward": original_reward,
             "landing_success": landing_success,
+            "both_legs_touching": both_legs_touching,  # Track this separately for debugging
             "fuel_used": fuel_used,
             "loss": loss if loss is not None else 0,
             "q_variance": q_variance if q_variance is not None else 0
@@ -132,8 +139,9 @@ def train_moonlander():
             avg_score = np.mean(scores_window)
             avg_original = np.mean([ep["original_reward"] for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):]])
             successful_landings = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] if ep.get("landing_success", False)])
+            both_legs_count = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] if ep.get("both_legs_touching", False)])
             
-            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}, Landings: {successful_landings}/100, Epsilon: {agent.epsilon:.3f}")
+            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}, True Landings: {successful_landings}/100, Both Legs: {both_legs_count}/100, Epsilon: {agent.epsilon:.3f}")
             
         # Evaluate and save best model periodically
         if episode > 0 and episode % 200 == 0:
@@ -203,7 +211,7 @@ def train_moonlander():
         landings = sum(1 for ep in window_episodes if ep.get("landing_success", False))
         landing_rate.append(landings / len(window_episodes) * 100)
     plt.plot(landing_rate)
-    plt.title('Landing Success Rate (%)')
+    plt.title('True Landing Success Rate (%)')
     plt.xlabel('Episode')
     plt.ylabel('Success Rate')
     
