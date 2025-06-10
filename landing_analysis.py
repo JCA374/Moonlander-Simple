@@ -2,8 +2,7 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 from dqn_agent import DQNAgent
-from improved_reward_shaper import ImprovedRewardShaper
-from fixed_reward_shaper import FixedRewardShaper
+from precision_landing_shaper import GentleLandingShaper
 
 
 def analyze_agent_behavior():
@@ -11,7 +10,7 @@ def analyze_agent_behavior():
 
     env = gym.make('LunarLander-v2')
     agent = DQNAgent(8, 4)
-    agent.load('moonlander_best.pth')
+    agent.load('models/moonlander_best.pth')
     agent.epsilon = 0
 
     episodes_data = []

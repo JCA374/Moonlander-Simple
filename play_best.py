@@ -3,7 +3,7 @@ import numpy as np
 import time
 from dqn_agent import DQNAgent
 
-def play_best_model(model_path='moonlander_best.pth', episodes=5, delay=0.02):
+def play_best_model(model_path='models/moonlander_best.pth', episodes=5, delay=0.02):
     """
     Play the best trained model with visual rendering
     

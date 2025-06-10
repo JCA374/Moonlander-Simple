@@ -44,7 +44,7 @@ def train_moonlander():
     os.makedirs(models_dir, exist_ok=True)
     
     # Load the best model if it exists
-    best_model_path = 'moonlander_best.pth'
+    best_model_path = os.path.join(models_dir, 'moonlander_best.pth')
     if os.path.exists(best_model_path):
         print(f"Loading previous best model from {best_model_path}")
         agent.load(best_model_path)
@@ -211,11 +211,7 @@ def train_moonlander():
             recent_episodes = logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] 
             outside_pad_failures = len([ep for ep in recent_episodes if ep.get("failure_reason") == "outside_pad"])
             
-            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}")
-            print(f"  TRUE Landings: {true_landings}/100 ({true_landings}%)")  # ✅ Real success rate
-            print(f"  Both legs touching: {both_legs_landings}/100 ({both_legs_landings}%)")  # Debugging
-            print(f"  Outside pad failures: {outside_pad_failures}/100")  # Key insight
-            print(f"  Epsilon: {agent.epsilon:.3f}")
+            print(f"Episode {episode}: Score {avg_score:.2f} | Original {avg_original:.2f} | TRUE {true_landings}% | Legs {both_legs_landings}% | OutPad {outside_pad_failures} | ε {agent.epsilon:.3f}")
             
         # 6. EVALUATION: Use consistent criteria for model saving
         if episode > 0 and episode % 200 == 0:
@@ -245,19 +241,21 @@ def train_moonlander():
             if is_better_model:
                 # Backup existing best model
                 import shutil
-                if os.path.exists('moonlander_best.pth'):
-                    shutil.copy('moonlander_best.pth', f'moonlander_best_backup_{episode}.pth')
+                best_model_full_path = os.path.join(models_dir, 'moonlander_best.pth')
+                if os.path.exists(best_model_full_path):
+                    backup_path = os.path.join(models_dir, f'moonlander_best_backup_{episode}.pth')
+                    shutil.copy(best_model_full_path, backup_path)
                 
                 best_landing_rate = true_landing_rate
                 best_eval_score = eval_score
                 episodes_since_best = 0
-                agent.save('moonlander_best.pth')
+                agent.save(os.path.join(models_dir, 'moonlander_best.pth'))
                 logger.log_milestone(episode, f"NEW BEST MODEL! {improvement_reason}")
                 print(f"🎯 NEW BEST MODEL! {improvement_reason}")
             else:
                 episodes_since_best += 200
                 
-            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings {true_landing_rate*100:.1f}%, Best Rate: {best_landing_rate*100:.1f}%")
+            print(f"📊 Eval {episode}: Score {eval_score:.2f} | TRUE {true_landing_rate*100:.1f}% | Best {best_landing_rate*100:.1f}%")
         
         # Save checkpoint based on dynamic interval (10 times during training)
         if episode > 0 and episode % checkpoint_interval == 0:
@@ -265,23 +263,23 @@ def train_moonlander():
             agent.save(checkpoint_path)
             progress = (episode / episodes) * 100
             logger.log_milestone(episode, f"Checkpoint saved at episode {episode} ({progress:.1f}% complete)")
-            print(f"💾 Checkpoint saved at episode {episode} ({progress:.1f}% complete)")
+            print(f"💾 Checkpoint {episode} ({progress:.1f}%)")
             
         # Also save at episode 0 to have initial state
         if episode == 0:
             checkpoint_path = os.path.join(models_dir, f'moonlander_checkpoint_{episode}.pth')
             agent.save(checkpoint_path)
-            print(f"💾 Initial checkpoint saved at episode {episode}")
+            print(f"💾 Initial checkpoint saved")
             
             
     # Save the final model
     if episode == episodes - 1:
         logger.log_milestone(episode, "Training completed. Saving final model...")
-        agent.save('moonlander_final.pth')
+        agent.save(os.path.join(models_dir, 'moonlander_final.pth'))
         
     # Ensure we have a best model saved
     if best_eval_score == float('-inf'):
-        agent.save('moonlander_best.pth')
+        agent.save(os.path.join(models_dir, 'moonlander_best.pth'))
         logger.log_milestone(episode, "No evaluation performed, saving current model as best")
             
     env.close()
