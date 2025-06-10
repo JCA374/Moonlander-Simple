@@ -71,7 +71,7 @@ def train_moonlander():
     
     # Best model tracking
     best_eval_score = baseline_score  # Use baseline from loaded model or -inf for new training
-    best_original_score = float('-inf')
+    best_landing_rate = baseline_rate if 'baseline_rate' in locals() else 0.0  # Track true landing rate
     episodes_since_best = 0
     
     for episode in range(episodes):
@@ -120,22 +120,45 @@ def train_moonlander():
         if episode % 100 == 0:  # Less frequent target updates for stability
             agent.update_target_network()
             
-        # Check if landing was successful
-        # Use both legs touching as the primary success metric (this is working correctly)
+        # CORRECTED LANDING SUCCESS DETECTION
+        
+        # 1. TRUE SUCCESS: What the environment actually rewards (use this for metrics)
+        true_success = terminated and reward > 0
+        
+        # 2. DEBUGGING METRICS: Useful for analysis but not training decisions
         both_legs_touching = terminated and next_state[6] and next_state[7]
+        one_leg_touching = terminated and (next_state[6] or next_state[7])
         
-        # Also check if the total episode reward indicates success
-        episode_success = terminated and original_reward >= 200
-        
-        # For main tracking, use both_legs_touching (since it's working)
-        landing_success = both_legs_touching
-        
-        # Optional: Also track episode success for comparison
+        # 3. FAILURE ANALYSIS: Understand why landings fail
+        failure_reason = "success"
+        if terminated and reward <= 0:
+            x_pos = next_state[0]
+            speed = np.sqrt(next_state[2]**2 + next_state[3]**2)
+            
+            if not (next_state[6] or next_state[7]):
+                failure_reason = "no_ground_contact"
+            elif not both_legs_touching:
+                failure_reason = "one_leg_only"
+            elif abs(x_pos) > 0.5:  # Outside landing pad
+                failure_reason = "outside_pad"
+            elif speed > 1.0:
+                failure_reason = "too_fast"
+            else:
+                failure_reason = "other_crash"
+        elif not terminated:
+            failure_reason = "timeout"
+            
+        # 4. LOG COMPREHENSIVE DATA
         logger.log_episode(episode, total_reward, agent.epsilon, step + 1, {
             "original_reward": original_reward,
-            "landing_success": landing_success,              # Both legs touching
-            "episode_success": episode_success,              # Total reward >= 200
-            "both_legs_touching": both_legs_touching,        # Same as landing_success
+            "true_success": true_success,              # ✅ REAL success metric
+            "both_legs_touching": both_legs_touching,  # For debugging
+            "one_leg_touching": one_leg_touching,      # For debugging
+            "failure_reason": failure_reason,          # Why it failed
+            "final_x_position": next_state[0],         # Where it landed
+            "final_y_position": next_state[1],         # Height at landing
+            "final_speed": np.sqrt(next_state[2]**2 + next_state[3]**2),
+            "final_angle": next_state[4],              # Landing angle
             "fuel_used": fuel_used,
             "loss": loss if loss is not None else 0,
             "q_variance": q_variance if q_variance is not None else 0
@@ -147,32 +170,47 @@ def train_moonlander():
         if len(scores_window) > 100:
             scores_window.pop(0)
             
+        # 5. CORRECT SUCCESS TRACKING: Use true_success for all metrics
         if episode % 50 == 0:
             avg_score = np.mean(scores_window)
             avg_original = np.mean([ep["original_reward"] for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):]])
-            successful_landings = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] if ep.get("landing_success", False)])
             
-            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}, Landings: {successful_landings}/100, Epsilon: {agent.epsilon:.3f}")
+            # ✅ CORRECTED: Use true_success instead of landing_success
+            true_landings = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] 
+                               if ep.get("true_success", False)])
             
-        # Evaluate and save best model periodically
+            # Also track the debugging metrics to see the gap
+            both_legs_landings = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] 
+                                    if ep.get("both_legs_touching", False)])
+            
+            # Failure analysis
+            recent_episodes = logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] 
+            outside_pad_failures = len([ep for ep in recent_episodes if ep.get("failure_reason") == "outside_pad"])
+            
+            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}")
+            print(f"  TRUE Landings: {true_landings}/100 ({true_landings}%)")  # ✅ Real success rate
+            print(f"  Both legs touching: {both_legs_landings}/100 ({both_legs_landings}%)")  # Debugging
+            print(f"  Outside pad failures: {outside_pad_failures}/100")  # Key insight
+            print(f"  Epsilon: {agent.epsilon:.3f}")
+            
+        # 6. EVALUATION: Use true_success for model saving decisions
         if episode > 0 and episode % 200 == 0:
-            # Quick evaluation
             current_epsilon = agent.epsilon
-            agent.epsilon = 0  # No exploration during evaluation
+            agent.epsilon = 0
             
-            eval_score, landing_rate = quick_evaluate(agent)
-            agent.epsilon = current_epsilon  # Restore epsilon
+            eval_score, true_landing_rate = quick_evaluate(agent)  # Make sure quick_evaluate uses true_success too
+            agent.epsilon = current_epsilon
             
-            # Check if this is the best model so far
-            if eval_score > best_eval_score:
-                best_eval_score = eval_score
+            # Save best model based on TRUE landing rate, not both_legs_touching
+            if true_landing_rate > best_landing_rate:  # Track best TRUE landing rate
+                best_landing_rate = true_landing_rate
                 episodes_since_best = 0
                 agent.save('moonlander_best.pth')
-                logger.log_milestone(episode, f"NEW BEST MODEL! Eval score: {eval_score:.2f}, Landing rate: {landing_rate*100:.1f}%")
+                logger.log_milestone(episode, f"NEW BEST MODEL! True landing rate: {true_landing_rate*100:.1f}%")
             else:
                 episodes_since_best += 200
                 
-            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, Landings {landing_rate*100:.1f}%, Best: {best_eval_score:.2f}")
+            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings: {true_landing_rate*100:.1f}%")
         
         # Save checkpoint periodically
         if episode > 0 and episode % 2000 == 0:

@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 from dqn_agent import DQNAgent
-from improved_reward_shaper import ImprovedRewardShaper
+from precision_landing_shaper import create_precision_shaper
 
 
 def quick_evaluate(agent, episodes=5):
@@ -9,7 +9,7 @@ def quick_evaluate(agent, episodes=5):
     Fixed evaluation that properly detects successful landings
     """
     eval_env = gym.make('LunarLander-v2')
-    reward_shaper = ImprovedRewardShaper()
+    reward_shaper = create_precision_shaper("precision")
 
     scores = []
     original_scores = []
