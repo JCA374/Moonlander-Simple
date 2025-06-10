@@ -1,7 +1,7 @@
 import numpy as np
 
 
-class EnhancedSpeedControlShaper:
+class RewardShaper:
     """
     Aggressive speed control fix based on analysis showing:
     - Main engine overuse (49.8%)
@@ -169,15 +169,15 @@ class EnhancedSpeedControlShaper:
         if done:
             if terminated:
                 if reward > 0:
-                    # Success - tier rewards based on gentleness
+                    # Success - tier rewards based on gentleness (doubled)
                     if speed < 0.25:
-                        terminal_bonus = 150.0  # MASSIVE bonus for ultra-gentle
+                        terminal_bonus = 300.0  # MASSIVE bonus for ultra-gentle
                     elif speed < 0.35:
-                        terminal_bonus = 100.0  # Great bonus for gentle
+                        terminal_bonus = 200.0  # Great bonus for gentle
                     elif speed < 0.5:
-                        terminal_bonus = 50.0   # Good bonus for acceptable
+                        terminal_bonus = 100.0   # Good bonus for acceptable
                     else:
-                        terminal_bonus = 10.0   # Small bonus for rough success
+                        terminal_bonus = 20.0   # Small bonus for rough success
                 else:
                     # Analyze crash reasons
                     if speed > 0.7:
@@ -199,57 +199,15 @@ class EnhancedSpeedControlShaper:
 
         shaped_reward += total_shaping
 
+        # =============================================================
+        # 8. FUEL COMPENSATION - Counter built-in fuel penalty
+        # =============================================================
+        
+        fuel_compensation = 0.0
+        if action != 0:  # Any engine use
+            fuel_compensation += 0.05  # Small compensation for built-in fuel penalty
+        
+        shaped_reward += fuel_compensation
 
         return shaped_reward
 
-
-class ConservativeSpeedShaper:
-    """
-    Even more conservative version if the above doesn't work
-    """
-
-    def __init__(self, gamma=0.99):
-        self.gamma = gamma
-        self.prev_phi = None
-
-    def reset(self):
-        self.prev_phi = None
-
-    def shape_reward(self, state, action, reward, done, step, terminated=None, truncated=None):
-        shaped_reward = reward
-
-        x, y = state[0], state[1]
-        vx, vy = state[2], state[3]
-
-        speed = np.hypot(vx, vy)
-        altitude = max(0, y)
-        distance_to_pad = abs(x)
-
-        # EXTREME speed penalties
-        speed_bonus = 0.0
-
-        if altitude < 0.5:
-            if speed < 0.3:
-                speed_bonus = 15.0  # MASSIVE reward for being slow
-            elif speed > 0.4:
-                speed_bonus = -20.0  # MASSIVE penalty for any speed
-
-        # MASSIVE main engine penalties
-        if action == 2 and speed < 0.5:
-            speed_bonus -= 10.0
-
-        # Basic guidance
-        phi = -distance_to_pad * 2.0 - altitude * 1.0
-        if self.prev_phi is not None:
-            shaped_reward += self.gamma * phi - self.prev_phi
-        self.prev_phi = phi
-
-        # Only reward ultra-gentle success
-        if done and terminated and reward > 0:
-            if speed < 0.2:
-                shaped_reward += 200.0
-            elif speed > 0.4:
-                shaped_reward -= 50.0  # Penalize even successful rough landings
-
-        shaped_reward += speed_bonus
-        return shaped_reward

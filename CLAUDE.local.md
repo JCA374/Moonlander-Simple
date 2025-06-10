@@ -1,0 +1,1 @@
+- Added fuel_compensation logic in shape_reward method to provide a small reward offset when engines are used, counteracting the built-in fuel penalty. This helps prevent the agent from being overly penalized for necessary engine usage.

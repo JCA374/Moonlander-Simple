@@ -8,7 +8,7 @@ from dqn_agent import DQNAgent
 from logger import TrainingLogger
 from evaluator import quick_evaluate
 
-from enhanced_speed_shaper import EnhancedSpeedControlShaper
+from reward_shaper import RewardShaper
 
 
 import torch
@@ -80,7 +80,7 @@ def train_moonlander():
     from torch.optim.lr_scheduler import StepLR
     scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
 
-    reward_shaper = EnhancedSpeedControlShaper()
+    reward_shaper = RewardShaper()
     logger = TrainingLogger()
 
     # Log training configuration
@@ -107,7 +107,7 @@ def train_moonlander():
     print("🎯 Running initial evaluation to establish baseline...")
     current_epsilon = agent.epsilon
     agent.epsilon = 0
-    initial_score, initial_rate = quick_evaluate(agent, episodes=10)
+    initial_score, initial_rate = quick_evaluate(agent, episodes=10, reward_shaper=reward_shaper)
     agent.epsilon = current_epsilon
 
     print(
@@ -249,7 +249,7 @@ def train_moonlander():
             current_epsilon = agent.epsilon
             agent.epsilon = 0
 
-            eval_score, true_landing_rate = quick_evaluate(agent)
+            eval_score, true_landing_rate = quick_evaluate(agent, reward_shaper=reward_shaper)
             agent.epsilon = current_epsilon
 
             # Debug the decision process
