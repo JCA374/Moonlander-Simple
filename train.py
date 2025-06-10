@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from dqn_agent import DQNAgent
-from speed_control_shaper import create_speed_shaper
+from precision_landing_shaper import create_precision_shaper
 from logger import TrainingLogger
 from evaluator import quick_evaluate
 
@@ -31,8 +31,8 @@ def train_moonlander():
         print(f"Loading previous best model from {best_model_path}")
         agent.load(best_model_path)
         # Force exploration of new strategies
-        agent.epsilon = 0.4
-        agent.epsilon_decay = 0.999
+        agent.epsilon = 0.6
+        agent.epsilon_decay = 0.9995
         episodes_input = input("How many episodes to train? (default 25000): ").strip()
         episodes = int(episodes_input) if episodes_input else 25000
         
@@ -52,7 +52,7 @@ def train_moonlander():
     from torch.optim.lr_scheduler import StepLR
     scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
     
-    reward_shaper = create_speed_shaper("speed_control")
+    reward_shaper = create_precision_shaper("precision")
     logger = TrainingLogger()
     
     # Log training configuration
