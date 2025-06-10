@@ -1,7 +1,8 @@
 import gymnasium as gym
 import numpy as np
 from dqn_agent import DQNAgent
-from improved_reward_shaper import ImprovedRewardShaper
+
+from behavior_corrector import BehaviorCorrectorShaper
 
 def evaluate_agent(model_path='moonlander_dqn.pth', episodes=10, render=True):
     env = gym.make('LunarLander-v2', render_mode='human' if render else None)
@@ -12,7 +13,7 @@ def evaluate_agent(model_path='moonlander_dqn.pth', episodes=10, render=True):
     agent.load(model_path)
     agent.epsilon = 0
     
-    reward_shaper = ImprovedRewardShaper()
+    reward_shaper = BehaviorCorrectorShaper()
     scores = []
     
     for episode in range(episodes):

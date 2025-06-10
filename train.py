@@ -3,9 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from dqn_agent import DQNAgent
-from precision_landing_shaper import create_precision_shaper
 from logger import TrainingLogger
 from evaluator import quick_evaluate
+
+from behavior_corrector import BehaviorCorrectorShaper
+
 
 import torch
 torch.set_num_threads(4)   # or torch.get_num_threads() // 2
@@ -72,7 +74,7 @@ def train_moonlander():
     from torch.optim.lr_scheduler import StepLR
     scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
     
-    reward_shaper = create_precision_shaper("precision")
+    reward_shaper = BehaviorCorrectorShaper()
     logger = TrainingLogger()
     
     # Log training configuration
@@ -91,6 +93,10 @@ def train_moonlander():
     
     # Best model tracking - variables already set above
     episodes_since_best = 0
+    
+    # Calculate checkpoint interval to save models 10 times during training
+    checkpoint_interval = max(1, episodes // 10)  # Save every 10% of total episodes
+    print(f"Will save checkpoints every {checkpoint_interval} episodes (10 times total)")
     
     for episode in range(episodes):
         state, _ = env.reset()
@@ -253,16 +259,19 @@ def train_moonlander():
                 
             print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings {true_landing_rate*100:.1f}%, Best Rate: {best_landing_rate*100:.1f}%")
         
-        # Save checkpoint periodically
-        if episode > 0 and episode % 2000 == 0:
+        # Save checkpoint based on dynamic interval (10 times during training)
+        if episode > 0 and episode % checkpoint_interval == 0:
             checkpoint_path = os.path.join(models_dir, f'moonlander_checkpoint_{episode}.pth')
             agent.save(checkpoint_path)
-            logger.log_milestone(episode, f"Checkpoint saved at episode {episode}")
+            progress = (episode / episodes) * 100
+            logger.log_milestone(episode, f"Checkpoint saved at episode {episode} ({progress:.1f}% complete)")
+            print(f"💾 Checkpoint saved at episode {episode} ({progress:.1f}% complete)")
             
-        # Force save every 5000 episodes regardless
-        if episode % 5000 == 0:
-            agent.save(f'moonlander_checkpoint_{episode}.pth')
-            print(f"Checkpoint saved at episode {episode}")
+        # Also save at episode 0 to have initial state
+        if episode == 0:
+            checkpoint_path = os.path.join(models_dir, f'moonlander_checkpoint_{episode}.pth')
+            agent.save(checkpoint_path)
+            print(f"💾 Initial checkpoint saved at episode {episode}")
             
             
     # Save the final model
