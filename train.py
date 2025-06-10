@@ -375,7 +375,7 @@ def train_moonlander():
     for i in range(len(logger.log_data["episodes"])):
         start_idx = max(0, i - window_size + 1)
         window_episodes = logger.log_data["episodes"][start_idx:i+1]
-        landings = sum(1 for ep in window_episodes if ep.get("landing_success", False))
+        landings = sum(1 for ep in window_episodes if ep.get("true_success", False))
         landing_rate.append(landings / len(window_episodes) * 100)
     plt.plot(landing_rate)
     plt.title('True Landing Success Rate (%)')
