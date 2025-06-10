@@ -47,6 +47,7 @@ def train_moonlander():
         print("No previous best model found, starting from scratch")
         episodes = 25000
         baseline_score = float('-inf')  # No baseline for new training
+        baseline_rate = 0.0  # No baseline landing rate for new training
     
     # add step learning-rate scheduler - halve LR every 5000 episodes  
     from torch.optim.lr_scheduler import StepLR
@@ -71,7 +72,7 @@ def train_moonlander():
     
     # Best model tracking
     best_eval_score = baseline_score  # Use baseline from loaded model or -inf for new training
-    best_landing_rate = baseline_rate if 'baseline_rate' in locals() else 0.0  # Track true landing rate
+    best_landing_rate = baseline_rate  # Track true landing rate
     episodes_since_best = 0
     
     for episode in range(episodes):
@@ -194,7 +195,8 @@ def train_moonlander():
             print(f"  Epsilon: {agent.epsilon:.3f}")
             
         # 6. EVALUATION: Use true_success for model saving decisions
-        if episode > 0 and episode % 200 == 0:
+        if episode % 200 == 0:  # Evaluate every 200 episodes including episode 0
+            print(f"Running evaluation at episode {episode}...")
             current_epsilon = agent.epsilon
             agent.epsilon = 0
             
@@ -203,6 +205,7 @@ def train_moonlander():
             
             # Save best model based on TRUE landing rate, not both_legs_touching
             if true_landing_rate > best_landing_rate:  # Track best TRUE landing rate
+                print(f"NEW BEST MODEL! Previous best: {best_landing_rate*100:.1f}%, Current: {true_landing_rate*100:.1f}%")
                 best_landing_rate = true_landing_rate
                 episodes_since_best = 0
                 agent.save('moonlander_best.pth')
@@ -210,7 +213,7 @@ def train_moonlander():
             else:
                 episodes_since_best += 200
                 
-            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings: {true_landing_rate*100:.1f}%")
+            print(f"[Eval] Episode {episode}: Score {eval_score:.2f}, TRUE Landings: {true_landing_rate*100:.1f}%, Best Rate: {best_landing_rate*100:.1f}%")
         
         # Save checkpoint periodically
         if episode > 0 and episode % 2000 == 0:
