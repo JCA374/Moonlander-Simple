@@ -5,29 +5,35 @@ import numpy as np
 import random
 from collections import deque
 
+import torch
+import torch.nn as nn
+
+
 class DQN(nn.Module):
     def __init__(self, state_size, action_size):
         super(DQN, self).__init__()
-        self.action_size = action_size
-        
-        # Shared feature layers
-        self.fc1 = nn.Linear(state_size, 64)
-        self.fc2 = nn.Linear(64, 64)
-        
+        # Shared feature layers (wider + LayerNorm)
+        self.fc1 = nn.Linear(state_size, 128)
+        self.ln1 = nn.LayerNorm(128)
+        self.fc2 = nn.Linear(128, 128)
+        self.ln2 = nn.LayerNorm(128)
+
         # Dueling streams
-        self.value_stream = nn.Linear(64, 1)
-        self.advantage_stream = nn.Linear(64, action_size)
-        
+        self.value_stream = nn.Linear(128, 1)
+        self.advantage_stream = nn.Linear(128, action_size)
+
     def forward(self, x):
-        # Shared features
-        x = torch.relu(self.fc1(x))
-        features = torch.relu(self.fc2(x))
-        
-        # Dueling streams
+        # Shared features with normalization
+        x = torch.relu(self.ln1(self.fc1(x)))
+        features = torch.relu(self.ln2(self.fc2(x)))
+
+        # Dueling heads
+        # shape: [B, 1]
         value = self.value_stream(features)
-        advantage = self.advantage_stream(features)
-        
-        # Combine: Q(s,a) = V(s) + (A(s,a) - mean(A(s)))
+        advantage = self.advantage_stream(
+            features)                      # shape: [B, A]
+
+        # Combine into Q(s,a)
         q_values = value + (advantage - advantage.mean(dim=1, keepdim=True))
         return q_values
 
