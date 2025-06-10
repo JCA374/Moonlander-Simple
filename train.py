@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from dqn_agent import DQNAgent
-from improved_reward_shaper import ImprovedRewardShaper
+from speed_control_shaper import create_speed_shaper
 from logger import TrainingLogger
 from evaluator import quick_evaluate
 
@@ -30,6 +30,9 @@ def train_moonlander():
     if os.path.exists(best_model_path):
         print(f"Loading previous best model from {best_model_path}")
         agent.load(best_model_path)
+        # Force exploration of new strategies
+        agent.epsilon = 0.4
+        agent.epsilon_decay = 0.999
         episodes_input = input("How many episodes to train? (default 25000): ").strip()
         episodes = int(episodes_input) if episodes_input else 25000
     else:
@@ -40,7 +43,7 @@ def train_moonlander():
     from torch.optim.lr_scheduler import StepLR
     scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
     
-    reward_shaper = ImprovedRewardShaper()
+    reward_shaper = create_speed_shaper("speed_control")
     logger = TrainingLogger()
     
     # Log training configuration
@@ -108,22 +111,22 @@ def train_moonlander():
         if episode % 100 == 0:  # Less frequent target updates for stability
             agent.update_target_network()
             
-        # Check if landing was successful - FIXED VERSION
-        # Game's definition: terminated with positive reward
-        true_landing_success = terminated and reward > 0
-        # Your current metric: both legs touching
+        # Check if landing was successful
+        # Use both legs touching as the primary success metric (this is working correctly)
         both_legs_touching = terminated and next_state[6] and next_state[7]
         
-        # Use the game's definition for logging
-        landing_success = true_landing_success
+        # Also check if the total episode reward indicates success
+        episode_success = terminated and original_reward >= 200
         
-
-        # Log episode data
-        # Drop per-step lists and hover_penalty to save memory & I/O
+        # For main tracking, use both_legs_touching (since it's working)
+        landing_success = both_legs_touching
+        
+        # Optional: Also track episode success for comparison
         logger.log_episode(episode, total_reward, agent.epsilon, step + 1, {
             "original_reward": original_reward,
-            "landing_success": landing_success,
-            "both_legs_touching": both_legs_touching,  # Track this separately for debugging
+            "landing_success": landing_success,              # Both legs touching
+            "episode_success": episode_success,              # Total reward >= 200
+            "both_legs_touching": both_legs_touching,        # Same as landing_success
             "fuel_used": fuel_used,
             "loss": loss if loss is not None else 0,
             "q_variance": q_variance if q_variance is not None else 0
@@ -139,9 +142,8 @@ def train_moonlander():
             avg_score = np.mean(scores_window)
             avg_original = np.mean([ep["original_reward"] for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):]])
             successful_landings = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] if ep.get("landing_success", False)])
-            both_legs_count = len([ep for ep in logger.log_data["episodes"][-min(100, len(logger.log_data["episodes"])):] if ep.get("both_legs_touching", False)])
             
-            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}, True Landings: {successful_landings}/100, Both Legs: {both_legs_count}/100, Epsilon: {agent.epsilon:.3f}")
+            print(f"Episode {episode}, Shaped Score: {avg_score:.2f}, Original: {avg_original:.2f}, Landings: {successful_landings}/100, Epsilon: {agent.epsilon:.3f}")
             
         # Evaluate and save best model periodically
         if episode > 0 and episode % 200 == 0:
