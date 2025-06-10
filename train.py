@@ -35,9 +35,18 @@ def train_moonlander():
         agent.epsilon_decay = 0.999
         episodes_input = input("How many episodes to train? (default 25000): ").strip()
         episodes = int(episodes_input) if episodes_input else 25000
+        
+        # Get baseline evaluation of loaded model to prevent immediate overwrite
+        print("Evaluating loaded model to establish baseline...")
+        current_epsilon = agent.epsilon
+        agent.epsilon = 0  # No exploration during evaluation
+        baseline_score, baseline_rate = quick_evaluate(agent)
+        agent.epsilon = current_epsilon  # Restore epsilon
+        print(f"Loaded model baseline: Score {baseline_score:.2f}, Landing rate: {baseline_rate*100:.1f}%")
     else:
         print("No previous best model found, starting from scratch")
         episodes = 25000
+        baseline_score = float('-inf')  # No baseline for new training
     
     # add step learning-rate scheduler - halve LR every 5000 episodes  
     from torch.optim.lr_scheduler import StepLR
@@ -61,7 +70,7 @@ def train_moonlander():
     scores_window = []
     
     # Best model tracking
-    best_eval_score = float('-inf')
+    best_eval_score = baseline_score  # Use baseline from loaded model or -inf for new training
     best_original_score = float('-inf')
     episodes_since_best = 0
     
