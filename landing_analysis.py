@@ -2,7 +2,7 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 from dqn_agent import DQNAgent
-from precision_landing_shaper import GentleLandingShaper
+from enhanced_speed_shaper import GentleLandingShaper
 
 
 def analyze_agent_behavior():

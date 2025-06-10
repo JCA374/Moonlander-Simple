@@ -2,11 +2,13 @@ import gymnasium as gym
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import time
+import shutil
 from dqn_agent import DQNAgent
 from logger import TrainingLogger
 from evaluator import quick_evaluate
 
-from behavior_corrector import BehaviorCorrectorShaper
+from enhanced_speed_shaper import EnhancedSpeedControlShaper
 
 
 import torch
@@ -35,48 +37,52 @@ def train_moonlander():
     env = TimeLimit(base_env, max_episode_steps=1000)
     state_size = env.observation_space.shape[0]
     action_size = env.action_space.n
-    
+
     # pass in soft update tau parameter
     agent = DQNAgent(state_size, action_size, tau=0.001)
-    
+
     # Create models folder if it doesn't exist
     models_dir = 'models'
     os.makedirs(models_dir, exist_ok=True)
-    
+
     # Load the best model if it exists
     best_model_path = os.path.join(models_dir, 'moonlander_best.pth')
     if os.path.exists(best_model_path):
-        print(f"Loading previous best model from {best_model_path}")
+        print(f"🔄 Loading previous model from {best_model_path}")
         agent.load(best_model_path)
         agent.epsilon = 0.6
         agent.epsilon_decay = 0.9995
-        episodes_input = input("How many episodes to train? (default 25000): ").strip()
+
+        # Create backup of loaded model
+        timestamp = int(time.time())
+        backup_path = os.path.join(
+            models_dir, f'moonlander_backup_{timestamp}.pth')
+        shutil.copy(best_model_path, backup_path)
+        print(f"📁 Backup saved to {backup_path}")
+
+        episodes_input = input(
+            "How many episodes to train? (default 25000): ").strip()
         episodes = int(episodes_input) if episodes_input else 25000
-        
-        # Get baseline evaluation of loaded model
-        print("Evaluating loaded model to establish baseline...")
-        current_epsilon = agent.epsilon
-        agent.epsilon = 0
-        baseline_score, baseline_rate = quick_evaluate(agent)
-        agent.epsilon = current_epsilon
-        
-        # Set baselines for comparison
-        best_eval_score = baseline_score
-        best_landing_rate = baseline_rate
-        print(f"Baseline established - Score: {baseline_score:.2f}, Landing rate: {baseline_rate*100:.1f}%")
+
+        # START FRESH - Don't use old model's peak performance as baseline
+        best_eval_score = float('-inf')
+        best_landing_rate = 0.0
+        print("✨ Starting fresh evaluation criteria to allow for adaptation")
+        print("   This prevents the resume training from being stuck with unrealistic baselines")
+
     else:
-        print("No previous best model found, starting from scratch")
+        print("🆕 No previous model found, starting from scratch")
         episodes = 25000
         best_eval_score = float('-inf')
         best_landing_rate = 0.0
-    
-    # add step learning-rate scheduler - halve LR every 5000 episodes  
+
+    # add step learning-rate scheduler - halve LR every 5000 episodes
     from torch.optim.lr_scheduler import StepLR
     scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
-    
-    reward_shaper = BehaviorCorrectorShaper()
+
+    reward_shaper = EnhancedSpeedControlShaper()
     logger = TrainingLogger()
-    
+
     # Log training configuration
     logger.log_config({
         "episodes": episodes,
@@ -86,17 +92,42 @@ def train_moonlander():
         "epsilon_start": agent.epsilon,
         "epsilon_min": agent.epsilon_min,
         "epsilon_decay": agent.epsilon_decay,
-        "reward_shaping": True
+        "reward_shaping": True,
+        "resumed_training": os.path.exists(best_model_path)
     })
+
+    # Continue with the rest of the training function...
     scores = []
     scores_window = []
-    
+
     # Best model tracking - variables already set above
     episodes_since_best = 0
-    
+
+    # Add early evaluation to establish realistic baseline
+    print("🎯 Running initial evaluation to establish baseline...")
+    current_epsilon = agent.epsilon
+    agent.epsilon = 0
+    initial_score, initial_rate = quick_evaluate(agent, episodes=10)
+    agent.epsilon = current_epsilon
+
+    print(
+        f"📊 Initial performance: Score={initial_score:.2f}, Landing rate={initial_rate*100:.1f}%")
+    print("   Any improvement above this will trigger model saving")
+
+    # Set initial baseline (but still allow for immediate improvements)
+    if initial_rate > 0:
+        # Set baseline slightly lower to allow for variance
+        best_landing_rate = initial_rate * 0.8
+        best_eval_score = initial_score * 0.8
+    else:
+        best_landing_rate = 0.0
+        best_eval_score = initial_score
+
     # Calculate checkpoint interval to save models 10 times during training
-    checkpoint_interval = max(1, episodes // 10)  # Save every 10% of total episodes
-    print(f"Will save checkpoints every {checkpoint_interval} episodes (10 times total)")
+    # Save every 10% of total episodes
+    checkpoint_interval = max(1, episodes // 10)
+    print(
+        f"💾 Will save checkpoints every {checkpoint_interval} episodes (10 times total)")
     
     for episode in range(episodes):
         state, _ = env.reset()
@@ -213,50 +244,84 @@ def train_moonlander():
             
             print(f"Episode {episode}: Score {avg_score:.2f} | Original {avg_original:.2f} | TRUE {true_landings}% | Legs {both_legs_landings}% | OutPad {outside_pad_failures} | ε {agent.epsilon:.3f}")
             
-        # 6. EVALUATION: Use consistent criteria for model saving
+        # 6. EVALUATION: Use more flexible criteria for model saving
         if episode > 0 and episode % 200 == 0:
             current_epsilon = agent.epsilon
             agent.epsilon = 0
-            
+
             eval_score, true_landing_rate = quick_evaluate(agent)
             agent.epsilon = current_epsilon
-            
+
             # Debug the decision process
-            debug_model_saving(episode, eval_score, true_landing_rate, best_eval_score, best_landing_rate)
-            
-            # Define what makes a "better" model - prioritize landing rate, then score
+            debug_model_saving(
+                episode, eval_score, true_landing_rate, best_eval_score, best_landing_rate)
+
+            # ENHANCED: More flexible improvement detection
             is_better_model = False
             improvement_reason = ""
-            
+            save_type = "best"  # "best" or "improving"
+
+            # Primary criteria: Landing rate improvement
             if true_landing_rate > best_landing_rate:
-                # Landing rate improved - always save
                 is_better_model = True
                 improvement_reason = f"Landing rate: {best_landing_rate*100:.1f}% -> {true_landing_rate*100:.1f}%"
-            elif true_landing_rate == best_landing_rate and eval_score > best_eval_score:
-                # Same landing rate but better score - save if score improved significantly
-                if eval_score > best_eval_score + 10:  # Significant improvement threshold
+
+            # Secondary criteria: Score improvement with same landing rate
+            elif true_landing_rate == best_landing_rate and eval_score > best_eval_score + 10:
+                is_better_model = True
+                improvement_reason = f"Score: {best_eval_score:.1f} -> {eval_score:.1f} (same landing rate)"
+
+            # NEW: Flexible criteria for resumed training - allow smaller improvements
+            elif episode < 1000:  # Early in resumed training, be more lenient
+                if true_landing_rate >= best_landing_rate * 0.9 and eval_score > best_eval_score:
                     is_better_model = True
-                    improvement_reason = f"Score: {best_eval_score:.1f} -> {eval_score:.1f} (same landing rate)"
-            
+                    save_type = "improving"
+                    improvement_reason = f"Early improvement: Score {best_eval_score:.1f} -> {eval_score:.1f}"
+
+            # NEW: Save if showing good absolute performance, even if not "best"
+            elif true_landing_rate >= 0.6 and eval_score > -50:  # Good absolute performance
+                if episode - episodes_since_best > 1000:  # Haven't saved in a while
+                    is_better_model = True
+                    save_type = "improving"
+                    improvement_reason = f"Good performance: {true_landing_rate*100:.1f}% landing rate, score {eval_score:.1f}"
+
             if is_better_model:
-                # Backup existing best model
-                import shutil
-                best_model_full_path = os.path.join(models_dir, 'moonlander_best.pth')
-                if os.path.exists(best_model_full_path):
-                    backup_path = os.path.join(models_dir, f'moonlander_best_backup_{episode}.pth')
-                    shutil.copy(best_model_full_path, backup_path)
-                
-                best_landing_rate = true_landing_rate
-                best_eval_score = eval_score
-                episodes_since_best = 0
-                agent.save(os.path.join(models_dir, 'moonlander_best.pth'))
-                logger.log_milestone(episode, f"NEW BEST MODEL! {improvement_reason}")
-                print(f"🎯 NEW BEST MODEL! {improvement_reason}")
+                # Choose filename based on save type
+                if save_type == "best":
+                    save_path = os.path.join(models_dir, 'moonlander_best.pth')
+                    # Backup existing best model
+                    if os.path.exists(save_path):
+                        backup_path = os.path.join(
+                            models_dir, f'moonlander_best_backup_{episode}.pth')
+                        shutil.copy(save_path, backup_path)
+
+                    # Update best metrics only for "best" saves
+                    best_landing_rate = true_landing_rate
+                    best_eval_score = eval_score
+                    episodes_since_best = 0
+
+                else:  # save_type == "improving"
+                    save_path = os.path.join(
+                        models_dir, f'moonlander_improving_{episode}.pth')
+                    # Don't update best metrics for "improving" saves
+
+                agent.save(save_path)
+                logger.log_milestone(
+                    episode, f"NEW {save_type.upper()} MODEL! {improvement_reason}")
+                print(f"🎯 NEW {save_type.upper()} MODEL! {improvement_reason}")
+                print(f"💾 Saved to: {save_path}")
+
             else:
                 episodes_since_best += 200
-                
-            print(f"📊 Eval {episode}: Score {eval_score:.2f} | TRUE {true_landing_rate*100:.1f}% | Best {best_landing_rate*100:.1f}%")
-        
+
+            print(
+                f"📊 Eval {episode}: Score {eval_score:.2f} | TRUE {true_landing_rate*100:.1f}% | Best {best_landing_rate*100:.1f}%")
+
+            # NEW: Warning if no improvement for too long
+            if episodes_since_best > 2000:
+                print(
+                    f"⚠️  No improvement for {episodes_since_best} episodes - consider adjusting hyperparameters")
+
         # Save checkpoint based on dynamic interval (10 times during training)
         if episode > 0 and episode % checkpoint_interval == 0:
             checkpoint_path = os.path.join(models_dir, f'moonlander_checkpoint_{episode}.pth')
