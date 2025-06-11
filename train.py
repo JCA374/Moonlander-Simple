@@ -80,7 +80,7 @@ def train_moonlander():
     from torch.optim.lr_scheduler import StepLR
     scheduler = StepLR(agent.optimizer, step_size=5000, gamma=0.5)
 
-    reward_shaper = RewardShaper()
+    reward_shaper = RewardShaper(enable_approach_tracking=True)
     logger = TrainingLogger()
 
     # Log training configuration
@@ -206,7 +206,7 @@ def train_moonlander():
         # 4. LOG COMPREHENSIVE DATA
         logger.log_episode(episode, total_reward, agent.epsilon, step + 1, {
             "original_reward": original_reward,
-            "true_success": true_success,              # ✅ REAL success metric
+            "landing_success": true_success,              # ✅ REAL success metric
             "both_legs_touching": both_legs_touching,  # For debugging
             "one_leg_touching": one_leg_touching,      # For debugging
             "failure_reason": failure_reason,          # Why it failed

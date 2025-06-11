@@ -209,7 +209,7 @@ class RewardShaper:
         if self.enable_potential_guidance:
             # Strictly decreasing potential as we approach goal
             # φ = -(distance + height penalty)
-            phi = -(distance_to_pad * 2.0 + max(0, altitude - 0.1) * 1.0)
+            phi = -(distance_to_pad * 5.0 + max(0, altitude - 0.1) * 1.0)
 
             # No bonus terms that could flip the sign
 
