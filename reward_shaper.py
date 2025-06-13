@@ -3,16 +3,19 @@ import numpy as np
 
 class RewardShaper:
     """
-    Modular anti-oscillation reward shaper with proper scaling and ablation support.
+    Enhanced reward shaper with improved horizontal precision guidance.
     
-    Each shaping component can be enabled/disabled for ablation studies.
-    All penalties/bonuses are scaled to work with LunarLander's ±100-200 reward range.
+    Key enhancements:
+    1. Stronger potential-based guidance on horizontal position (12x weight)
+    2. Explicit horizontal penalty near landing (3.0 * |x| when altitude < 0.4)
+    3. Better side engine incentives (2.0x bonus)
+    4. Tighter commitment zone control (2.5x penalty for sideways drift)
     """
 
     def __init__(self, gamma=0.99, enable_oscillation_penalty=True,
                  enable_commitment_bonus=True, enable_speed_control=True,
                  enable_engine_correction=True, enable_potential_guidance=True,
-                 enable_approach_tracking=False):
+                 enable_approach_tracking=False, enable_horizontal_precision=True):
         self.gamma = gamma
 
         # Ablation control flags
@@ -22,19 +25,27 @@ class RewardShaper:
         self.enable_engine_correction = enable_engine_correction
         self.enable_potential_guidance = enable_potential_guidance
         self.enable_approach_tracking = enable_approach_tracking
+        self.enable_horizontal_precision = enable_horizontal_precision  # NEW
 
-        # Tunable parameters (extracted from hard-coded constants)
+        # ENHANCED: Stronger horizontal guidance parameters
         self.osc_penalty_coeff = 1.5
         self.commitment_descent_bonus = 2.0
-        self.commitment_vx_penalty = 1.0
+        self.commitment_vx_penalty = 2.5  # INCREASED from 1.0
         self.commitment_upward_penalty = 2.0
         self.speed_good_bonus = 2.0
         self.speed_bad_penalty = 3.0
         self.engine_main_penalty = 2.0
-        self.engine_side_bonus = 0.5
+        self.engine_side_bonus = 2.0  # INCREASED from 0.5
         self.engine_coast_bonus = 1.0
         self.hover_penalty_max = 3.0
         self.hover_threshold_steps = 20
+
+        # NEW: Horizontal precision parameters
+        self.horizontal_guidance_weight = 12.0  # INCREASED from 5.0
+        self.horizontal_penalty_coeff = 3.0     # NEW parameter
+        self.horizontal_penalty_altitude = 0.4  # NEW parameter
+
+        # Terminal bonuses
         self.terminal_success_base = 20.0
         self.terminal_efficiency_bonus = 15.0
         self.terminal_gentle_bonus = 10.0
@@ -46,12 +57,12 @@ class RewardShaper:
         # Core tracking
         self.prev_phi = None
 
-        # Oscillation detection (simplified)
+        # Oscillation detection
         self.velocity_history = []
-        self.direction_changes = 0  # Total flips for entire episode
+        self.direction_changes = 0
         self.hover_count = 0
 
-        # Approach tracking (now properly implemented)
+        # Approach tracking
         self.consecutive_approach_steps = 0
         self.last_distance = None
 
@@ -66,8 +77,7 @@ class RewardShaper:
 
     def shape_reward(self, state, action, reward, done, step, terminated=None, truncated=None):
         """
-        Apply modular reward shaping with proper scaling.
-        All bonuses/penalties scaled to 1-5 range to avoid overwhelming environment signal.
+        Enhanced reward shaping with improved horizontal precision guidance.
         """
         shaped_reward = reward
 
@@ -85,48 +95,43 @@ class RewardShaper:
             self.velocity_history.pop(0)
 
         # =============================================================
-        # 1. OSCILLATION PENALTY (Simplified and properly scaled)
+        # 1. OSCILLATION PENALTY
         # =============================================================
 
         if self.enable_oscillation_penalty and len(self.velocity_history) >= 6:
-            # Count velocity direction changes (simpler than position peaks)
             vx_sign_changes = 0
             for i in range(1, len(self.velocity_history)):
                 if (np.sign(self.velocity_history[i]) != np.sign(self.velocity_history[i-1])
-                        and abs(self.velocity_history[i]) > 0.05):  # Ignore tiny movements
+                        and abs(self.velocity_history[i]) > 0.05):
                     vx_sign_changes += 1
-                    self.direction_changes += 1  # Track total for episode
+                    self.direction_changes += 1
 
-            # Apply penalty based on recent oscillations
-            if vx_sign_changes >= 2:  # Multiple direction changes in recent history
+            if vx_sign_changes >= 2:
                 oscillation_penalty = -self.osc_penalty_coeff * vx_sign_changes
                 shaped_reward += oscillation_penalty
 
         # =============================================================
-        # 2. APPROACH TRACKING (Now properly implemented)
+        # 2. APPROACH TRACKING
         # =============================================================
 
         if self.enable_approach_tracking:
             approach_bonus = 0.0
 
-            # Track if agent is making progress toward landing
             if self.last_distance is not None:
                 distance_change = self.last_distance - distance_to_pad
 
-                if distance_change > 0.01:  # Moving closer to pad
+                if distance_change > 0.01:
                     self.consecutive_approach_steps += 1
                     approach_bonus += 0.5
 
-                    # Bonus for sustained approach
                     if self.consecutive_approach_steps > 10:
                         approach_bonus += 1.0
 
-                elif distance_change < -0.01:  # Moving away from pad
+                elif distance_change < -0.01:
                     self.consecutive_approach_steps = 0
-                    if altitude < 1.0:  # Penalize moving away when low
+                    if altitude < 1.0:
                         approach_bonus -= 1.0
                 else:
-                    # Not making much progress - slow decay
                     self.consecutive_approach_steps = max(
                         0, self.consecutive_approach_steps - 1)
 
@@ -134,23 +139,21 @@ class RewardShaper:
             shaped_reward += approach_bonus
 
         # =============================================================
-        # 3. COMMITMENT BONUS (When close to pad, reward descent)
+        # 3. COMMITMENT BONUS (enhanced horizontal control)
         # =============================================================
 
         if self.enable_commitment_bonus:
             commitment_bonus = 0.0
 
-            # Only apply when in "commitment zone"
             if distance_to_pad < 0.4 and altitude < 0.8:
                 # Reward downward movement
                 if vy < -0.1:
                     commitment_bonus += self.commitment_descent_bonus
 
-                    # Extra bonus for sustained descent when very close
                     if altitude < 0.4 and vy < -0.05:
                         commitment_bonus += self.commitment_descent_bonus * 0.75
 
-                # Small penalty for horizontal movement in commitment zone
+                # ENHANCED: Stronger penalty for horizontal movement in commitment zone
                 if abs(vx) > 0.2:
                     commitment_bonus -= self.commitment_vx_penalty
 
@@ -161,13 +164,12 @@ class RewardShaper:
             shaped_reward += commitment_bonus
 
         # =============================================================
-        # 4. SPEED CONTROL (Scaled down from original)
+        # 4. SPEED CONTROL
         # =============================================================
 
         if self.enable_speed_control:
             speed_control = 0.0
 
-            # Altitude-based speed requirements (much gentler scaling)
             if altitude < 0.3:
                 if speed <= 0.3:
                     speed_control += self.speed_good_bonus
@@ -182,7 +184,7 @@ class RewardShaper:
             shaped_reward += speed_control
 
         # =============================================================
-        # 5. ENGINE CORRECTION (Simplified)
+        # 5. ENGINE CORRECTION (enhanced side engine bonus)
         # =============================================================
 
         if self.enable_engine_correction:
@@ -192,7 +194,7 @@ class RewardShaper:
             if action == 2 and speed < 0.4 and altitude < 0.6:
                 engine_bonus -= self.engine_main_penalty
 
-            # Reward side engines for control
+            # ENHANCED: Stronger reward for side engines for horizontal control
             elif (action == 1 or action == 3) and distance_to_pad > 0.1:
                 engine_bonus += self.engine_side_bonus
 
@@ -203,15 +205,13 @@ class RewardShaper:
             shaped_reward += engine_bonus
 
         # =============================================================
-        # 6. POTENTIAL-BASED GUIDANCE (Fixed)
+        # 6. ENHANCED POTENTIAL-BASED GUIDANCE
         # =============================================================
 
         if self.enable_potential_guidance:
-            # Strictly decreasing potential as we approach goal
-            # φ = -(distance + height penalty)
-            phi = -(distance_to_pad * 5.0 + max(0, altitude - 0.1) * 1.0)
-
-            # No bonus terms that could flip the sign
+            # ENHANCED: Much stronger weight on horizontal distance
+            phi = -(distance_to_pad * self.horizontal_guidance_weight +
+                    max(0, altitude - 0.1) * 1.0)
 
             if self.prev_phi is not None:
                 potential_bonus = self.gamma * phi - self.prev_phi
@@ -219,10 +219,19 @@ class RewardShaper:
             self.prev_phi = phi
 
         # =============================================================
-        # 7. ANTI-HOVERING (Improved reset logic)
+        # 7. NEW: EXPLICIT HORIZONTAL PRECISION PENALTY
         # =============================================================
 
-        # Improved hovering detection with aggressive reset
+        if self.enable_horizontal_precision:
+            # Direct penalty for being off-center when close to ground
+            if altitude < self.horizontal_penalty_altitude:
+                horizontal_penalty = -self.horizontal_penalty_coeff * abs(x)
+                shaped_reward += horizontal_penalty
+
+        # =============================================================
+        # 8. ANTI-HOVERING
+        # =============================================================
+
         if speed < 0.15 and altitude > 0.2:
             self.hover_count += 1
             if self.hover_count > self.hover_threshold_steps:
@@ -230,11 +239,10 @@ class RewardShaper:
                                      (self.hover_count - self.hover_threshold_steps) * 0.1)
                 shaped_reward += hover_penalty
         else:
-            # Aggressive reset - any good movement clears the slate
             self.hover_count = 0
 
         # =============================================================
-        # 8. TERMINAL REWARDS (Moderate scaling)
+        # 9. TERMINAL REWARDS
         # =============================================================
 
         if done:
@@ -242,42 +250,36 @@ class RewardShaper:
 
             if terminated:
                 if reward > 0:
-                    # Success bonuses (scaled down)
                     terminal_bonus = self.terminal_success_base
 
-                    # Efficiency bonus for quick landing
                     if step < 300:
                         terminal_bonus += self.terminal_efficiency_bonus
 
-                    # Gentleness bonus
                     if speed < 0.3:
                         terminal_bonus += self.terminal_gentle_bonus
 
                 else:
-                    # Failure analysis (gentle penalties)
                     if speed > 0.7:
                         terminal_bonus = -self.terminal_failure_penalty
                     else:
                         terminal_bonus = -self.terminal_failure_penalty * 0.4
             else:
-                # Timeout penalty
                 terminal_bonus = -self.terminal_timeout_penalty
 
-                # Extra penalty for excessive oscillation (consistent scale with detection)
                 if self.direction_changes > self.terminal_osc_threshold:
                     terminal_bonus -= self.terminal_osc_penalty
 
             shaped_reward += terminal_bonus
 
         # =============================================================
-        # 9. FUEL COMPENSATION (Unchanged)
+        # 10. FUEL COMPENSATION
         # =============================================================
 
         if action != 0:
             shaped_reward += 0.05
 
-        # Apply safety clamps to prevent runaway shaping
-        max_total_shaping = 15.0  # Prevent overwhelming environment signal
+        # Apply safety clamps (increased for new horizontal penalty)
+        max_total_shaping = 20.0  # INCREASED from 15.0
         if abs(shaped_reward - reward) > max_total_shaping:
             excess = shaped_reward - reward
             clamped_excess = np.sign(excess) * max_total_shaping
@@ -292,7 +294,9 @@ class RewardShaper:
             'hover_count': self.hover_count,
             'consecutive_approach_steps': self.consecutive_approach_steps,
             'velocity_history_length': len(self.velocity_history),
-            'last_distance': self.last_distance
+            'last_distance': self.last_distance,
+            'horizontal_guidance_weight': self.horizontal_guidance_weight,
+            'horizontal_penalty_coeff': self.horizontal_penalty_coeff
         }
 
     def update_parameters(self, **kwargs):
@@ -300,5 +304,49 @@ class RewardShaper:
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
+                print(f"✅ Updated {key} = {value}")
             else:
-                print(f"Warning: Parameter '{key}' not found")
+                print(f"❌ Warning: Parameter '{key}' not found")
+
+    def set_horizontal_precision_mode(self, mode="moderate"):
+        """Preset configurations for different precision levels"""
+        modes = {
+            "gentle": {
+                'horizontal_guidance_weight': 8.0,
+                'horizontal_penalty_coeff': 1.5,
+                'commitment_vx_penalty': 1.5,
+                'engine_side_bonus': 1.2
+            },
+            "moderate": {
+                'horizontal_guidance_weight': 10.0,
+                'horizontal_penalty_coeff': 2.5,
+                'commitment_vx_penalty': 2.0,
+                'engine_side_bonus': 1.5
+            },
+            "aggressive": {
+                'horizontal_guidance_weight': 12.0,
+                'horizontal_penalty_coeff': 3.0,
+                'commitment_vx_penalty': 2.5,
+                'engine_side_bonus': 2.0
+            },
+            "extreme": {
+                'horizontal_guidance_weight': 15.0,
+                'horizontal_penalty_coeff': 4.0,
+                'commitment_vx_penalty': 3.0,
+                'engine_side_bonus': 2.5
+            }
+        }
+
+        if mode not in modes:
+            print(f"❌ Unknown mode '{mode}'. Available: {list(modes.keys())}")
+            return
+
+        for param, value in modes[mode].items():
+            setattr(self, param, value)
+
+        print(f"✅ Set horizontal precision to '{mode}' mode")
+        print(
+            f"   Horizontal guidance weight: {self.horizontal_guidance_weight}")
+        print(f"   Horizontal penalty coeff: {self.horizontal_penalty_coeff}")
+        print(f"   Commitment vx penalty: {self.commitment_vx_penalty}")
+        print(f"   Engine side bonus: {self.engine_side_bonus}")
