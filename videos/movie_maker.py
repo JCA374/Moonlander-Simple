@@ -3,227 +3,514 @@ import numpy as np
 import cv2
 import os
 import glob
+import re
+from datetime import datetime
 from dqn_agent import DQNAgent
 from reward_shaper import RewardShaper
 
 
-class SimpleVideoGenerator:
-    """Simple video generator using existing code"""
+class ModelVideoMerger:
+    """
+    Enhanced video creator that merges all models with custom explanations
+    and clear Game Score vs AI Score display
+    """
 
-    def __init__(self):
-        # Easy settings to change
-        self.speed_multiplier = 1.5  # 3x speed
+    def __init__(self, models_folder='model_to_video', output_folder='merged_videos'):
+        self.models_folder = models_folder
+        self.output_folder = output_folder
+        os.makedirs(output_folder, exist_ok=True)
+
+        # Video settings
         self.fps = 30
+        self.speed_multiplier = 2.0  # 2x speed
+        self.resolution = (1200, 900)  # Width x Height for game area
+        self.overlay_height = 200  # Space for text at bottom
 
-        # Model descriptions - EDIT THESE!
-        self.descriptions = {
-            'moonlander_best.pth': 'Best Model',
-            'moonlander_final.pth': 'Final Model',
-            'moonlander_checkpoint_0.pth': 'Before Training',
-            'moonlander_checkpoint_5000.pth': 'Early Training',
-            'moonlander_checkpoint_10000.pth': 'Mid Training',
-            'moonlander_checkpoint_15000.pth': 'Late Training',
-            'moonlander_checkpoint_20000.pth': 'Advanced Training',
-            'moonlander_checkpoint_25000.pth': 'Complete Training',
+        # Initialize reward shaper for AI scores
+        self.reward_shaper = RewardShaper()
+
+        # Model explanations - CUSTOMIZE THESE!
+        self.model_explanations = {
+            'moonlander_best.pth': 'The best performing model - masters precision landing',
+            'moonlander_final.pth': 'Final model after complete training',
+            'moonlander_checkpoint_0.pth': 'Untrained AI - completely random actions',
+            'moonlander_checkpoint_2500.pth': 'Early learning - basic movement control',
+            'moonlander_checkpoint_5000.pth': 'Developing skills - learning to approach pad',
+            'moonlander_checkpoint_7500.pth': 'Intermediate - better fuel management',
+            'moonlander_checkpoint_10000.pth': 'Advanced - consistent landing attempts',
+            'moonlander_checkpoint_12500.pth': 'Expert level - refined technique',
+            'moonlander_checkpoint_15000.pth': 'Near mastery - reliable landings',
+            'moonlander_checkpoint_17500.pth': 'Mastery - optimal performance',
+            'moonlander_checkpoint_20000.pth': 'Peak performance - precision control',
+            'moonlander_improving_4600.pth': 'Breakthrough moment - first consistent landings',
+            'moonlander_improving_6400.pth': 'Major improvement - reliable success',
         }
 
-    def add_text_overlay(self, frame, model_name, score, description):
-        """Add text and score bar to frame"""
-        height, width = frame.shape[:2]
+    def discover_and_sort_models(self):
+        """Find all models and sort them chronologically"""
+        model_files = glob.glob(os.path.join(self.models_folder, '*.pth'))
 
-        # Add semi-transparent black bars for text
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (width, 80), (0, 0, 0), -1)
-        cv2.rectangle(overlay, (0, height-80), (width, height), (0, 0, 0), -1)
-        frame = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+        if not model_files:
+            print(f"❌ No models found in {self.models_folder}/")
+            return []
 
-        # Model name at top with shadow effect
-        shadow_offset = 2
-        cv2.putText(frame, f"Model: {model_name}", (12, 42),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 3)  # Shadow
-        cv2.putText(frame, f"Model: {model_name}", (10, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+        models = []
+        for file_path in model_files:
+            filename = os.path.basename(file_path)
+            episode_num = self.extract_episode_number(filename)
 
-        # Description at bottom with shadow
-        cv2.putText(frame, description, (12, height-22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3)  # Shadow
-        cv2.putText(frame, description, (10, height-20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+            models.append({
+                'filename': filename,
+                'path': file_path,
+                'episode': episode_num,
+                'explanation': self.model_explanations.get(
+                    filename,
+                    f'Training model from episode {episode_num}'
+                )
+            })
 
-        # Fancier score bar in top right
-        bar_width = 250
-        bar_height = 40
-        bar_x = width - bar_width - 20
-        bar_y = 20
+        # Sort by episode number (lowest to highest, then best)
+        models.sort(key=lambda x: x['episode'])
 
-        # Rounded rectangle background (simulate with multiple rectangles)
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height),
-                      (40, 40, 40), -1)
-        cv2.rectangle(frame, (bar_x-2, bar_y-2), (bar_x + bar_width+2, bar_y + bar_height+2),
-                      (255, 255, 255), 2)  # White border
+        print(f"📋 Found {len(models)} models in chronological order:")
+        for model in models:
+            if model['episode'] < 999990:  # Regular episode numbers
+                print(f"  Episode {model['episode']:>6}: {model['filename']}")
+            else:  # Special models (final, best)
+                print(f"  {'Final/Best':>6}: {model['filename']}")
 
-        # Score fill with gradient effect
-        normalized_score = (score + 100) / 400
-        normalized_score = np.clip(normalized_score, 0, 1)
-        fill_width = int((bar_width - 4) * normalized_score)
+        return models
 
-        # Color gradient based on score
-        if score < -50:
-            color = (60, 60, 255)  # Bright red
-        elif score < 0:
-            color = (100, 100, 255)  # Light red
-        elif score < 100:
-            color = (0, 200, 255)  # Orange
-        elif score < 200:
-            color = (0, 255, 255)  # Yellow
+    def extract_episode_number(self, filename):
+        """Extract episode number for chronological sorting"""
+        # Special handling for best/final models to ensure they come last
+        if 'best' in filename:
+            return 999999  # Best goes very last
+        elif 'final' in filename:
+            return 999998  # Final goes second to last
+
+        # Extract episode numbers from different filename patterns
+        if 'checkpoint' in filename:
+            match = re.search(r'checkpoint_(\d+)', filename)
+            return int(match.group(1)) if match else 0
+        elif 'improving' in filename:
+            match = re.search(r'improving_(\d+)', filename)
+            return int(match.group(1)) if match else 0
+        elif 'backup' in filename:
+            match = re.search(r'backup_(\d+)', filename)
+            return int(match.group(1)) if match else 0
         else:
-            color = (0, 255, 100)  # Bright green
+            # Try to find any number in filename
+            match = re.search(r'(\d+)', filename)
+            return int(match.group(1)) if match else 0
 
-        if fill_width > 0:
-            cv2.rectangle(frame, (bar_x + 2, bar_y + 2),
-                          (bar_x + 2 + fill_width, bar_y + bar_height - 2),
-                          color, -1)
-
-        # Score text with better formatting
-        score_text = f"{score:.0f}"
-        text_size = cv2.getTextSize(
-            score_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-        text_x = bar_x + (bar_width - text_size[0]) // 2
-        text_y = bar_y + (bar_height + text_size[1]) // 2
-
-        # Score text with shadow
-        cv2.putText(frame, score_text, (text_x + 1, text_y + 1),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 3)
-        cv2.putText(frame, score_text, (text_x, text_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-        # Add "SCORE" label above bar
-        cv2.putText(frame, "SCORE", (bar_x + bar_width//2 - 30, bar_y - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-
-        return frame
-
-    def record_model(self, model_path):
-        """Record one episode of a model"""
+    def record_model_episode(self, model_info, seed=42):
+        """Record one episode for a model"""
         env = gym.make('LunarLander-v2', render_mode='rgb_array')
-        agent = DQNAgent(8, 4)
 
+        # Load agent
+        agent = DQNAgent(8, 4)
         try:
-            agent.load(model_path)
-            agent.epsilon = 0
-        except:
-            print(f"Could not load {model_path}")
+            agent.load(model_info['path'])
+            agent.epsilon = 0  # No exploration
+        except Exception as e:
+            print(f"❌ Error loading {model_info['filename']}: {e}")
             env.close()
             return None
 
-        model_name = os.path.basename(model_path)
-        description = self.descriptions.get(model_name, "Training Model")
+        # Reset environment and reward shaper
+        state, _ = env.reset(seed=seed)
+        self.reward_shaper.reset()
 
-        state, _ = env.reset()
         frames = []
-        total_reward = 0
+        game_score = 0  # Original game score
+        ai_score = 0    # AI training score
 
-        print(f"Recording {model_name}: {description}")
+        print(f"🎬 Recording {model_info['filename']}")
 
-        for step in range(1000):
+        for step in range(800):  # Max steps
+            # Capture frame
+            frame = env.render()
+            frames.append(frame)
+
+            # Get action and step
             action = agent.act(state)
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
-            total_reward += reward
+            # Update scores
+            game_score += reward
 
-            # Get frame and add overlay
-            frame = env.render()
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            frame = cv2.resize(frame, (960, 720))  # Higher resolution
-            frame = self.add_text_overlay(
-                frame, model_name, total_reward, description)
+            # Get AI training score using reward shaper
+            shaped_reward = self.reward_shaper.shape_reward(
+                state, action, reward, done, step, terminated, truncated
+            )
+            ai_score += shaped_reward
 
-            frames.append(frame)
             state = next_state
 
             if done:
-                # Hold last frame for 2 seconds
-                for _ in range(60):
+                # Hold final frame for 1 second
+                for _ in range(self.fps):
                     frames.append(frame)
                 break
 
         env.close()
-        return frames
 
-    def create_video(self, output_name='moonlander_models.mp4', models_folder='model_to_video'):
-        """Create video of all models"""
-        # Find all models
-        model_files = sorted(glob.glob(os.path.join(models_folder, '*.pth')))
+        return {
+            'frames': frames,
+            'game_score': game_score,
+            'ai_score': ai_score,
+            'success': terminated and reward > 0 if 'reward' in locals() else False,
+            'episode_length': len(frames)
+        }
 
-        # Sort to show in order: checkpoints by number (low to high), then final, then best
-        def sort_key(path):
-            name = os.path.basename(path)
-            if 'best' in name:
-                return 999999  # Best goes last
-            if 'final' in name:
-                return 999998  # Final goes second to last
-            if 'checkpoint' in name:
-                try:
-                    num = int(name.split('_')[1].split('.')[0])
-                    return num  # Sort checkpoints by their number
-                except:
-                    return 999997
-            if 'improving' in name:
-                try:
-                    num = int(name.split('_')[1].split('.')[0])
-                    return num  # Sort improving models by their number
-                except:
-                    return 999997
-            return 999997
+    def create_overlay(self, frame, model_info, episode_data, current_game_score, current_ai_score):
+        """Create enhanced overlay with scores and explanation"""
+        height, width = frame.shape[:2]
 
-        model_files.sort(key=sort_key)
+        # Create overlay area (bottom section)
+        overlay = frame.copy()
+        overlay_start_y = height - self.overlay_height
 
-        if not model_files:
-            print("No models found in models/ folder")
-            return
+        # Semi-transparent dark background
+        cv2.rectangle(overlay, (0, overlay_start_y),
+                      (width, height), (0, 0, 0), -1)
+        frame_with_overlay = cv2.addWeighted(frame, 0.7, overlay, 0.3, 0)
+
+        # Title (model name)
+        model_display_name = self.get_display_name(model_info['filename'])
+        cv2.putText(frame_with_overlay, model_display_name, (20, overlay_start_y + 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+
+        # Explanation text (smaller, wrapped if needed)
+        explanation = model_info['explanation']
+        self.draw_wrapped_text(frame_with_overlay, explanation,
+                               (20, overlay_start_y + 70), width - 40, 0.8, (200, 200, 200))
+
+        # Score displays in top-left corner with final scores
+        self.draw_score_display(frame_with_overlay, current_game_score, current_ai_score,
+                                episode_data['game_score'], episode_data['ai_score'])
+
+        return frame_with_overlay
+
+    def get_display_name(self, filename):
+        """Convert filename to readable display name"""
+        if 'best' in filename:
+            return '🏆 Best Model'
+        elif 'final' in filename:
+            return '🎓 Final Model'
+        elif 'checkpoint_0' in filename:
+            return '🎲 Untrained AI'
+        elif 'checkpoint' in filename:
+            match = re.search(r'checkpoint_(\d+)', filename)
+            if match:
+                episode = int(match.group(1))
+                return f'📈 Episode {episode:,}'
+        elif 'improving' in filename:
+            match = re.search(r'improving_(\d+)', filename)
+            if match:
+                episode = int(match.group(1))
+                return f'⭐ Breakthrough: Episode {episode:,}'
+
+        return filename.replace('.pth', '').replace('_', ' ').title()
+
+    def draw_wrapped_text(self, frame, text, start_pos, max_width, font_scale, color):
+        """Draw text with word wrapping"""
+        x, y = start_pos
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        thickness = 2
+
+        words = text.split(' ')
+        lines = []
+        current_line = []
+
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            (text_width, _), _ = cv2.getTextSize(
+                test_line, font, font_scale, thickness)
+
+            if text_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word]
+
+        if current_line:
+            lines.append(' '.join(current_line))
+
+        # Draw lines
+        line_height = int(font_scale * 30)
+        for i, line in enumerate(lines[:2]):  # Max 2 lines
+            cv2.putText(frame, line, (x, y + i * line_height),
+                        font, font_scale, color, thickness)
+
+    def draw_score_display(self, frame, game_score, ai_score, final_game_score=None, final_ai_score=None):
+        """Draw larger score display in top-left with final scores"""
+        height, width = frame.shape[:2]
+
+        # Larger background box in top-left
+        box_width = 400
+        box_height = 180
+        box_x = 20  # Left side
+        box_y = 20  # Top
+
+        # Semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (box_x, box_y), (box_x + box_width, box_y + box_height),
+                      (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
+
+        # White border
+        cv2.rectangle(frame, (box_x, box_y), (box_x + box_width, box_y + box_height),
+                      (255, 255, 255), 3)
+
+        # Center the content within the box
+        content_start_x = box_x + 20
+
+        # Title - larger and centered
+        title_text = "SCORES"
+        title_size = cv2.getTextSize(
+            title_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 3)[0]
+        title_x = box_x + (box_width - title_size[0]) // 2
+        cv2.putText(frame, title_text, (title_x, box_y + 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 3)
+
+        # Current scores - larger font
+        y_offset = 70
+
+        # Game Score (current)
+        game_text = f"Game: {game_score:.0f}"
+        cv2.putText(frame, game_text, (content_start_x, box_y + y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 255, 100), 2)
+
+        # AI Score (current)
+        ai_text = f"AI: {ai_score:.0f}"
+        cv2.putText(frame, ai_text, (content_start_x, box_y + y_offset + 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 150, 255), 2)
+
+        # Final scores (if provided)
+        if final_game_score is not None and final_ai_score is not None:
+            # Separator line
+            cv2.line(frame, (content_start_x, box_y + y_offset + 50),
+                     (box_x + box_width - 20, box_y + y_offset + 50), (100, 100, 100), 1)
+
+            # Final scores
+            final_text = "FINAL:"
+            cv2.putText(frame, final_text, (content_start_x, box_y + y_offset + 75),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
+
+            final_game_text = f"Game: {final_game_score:.0f}"
+            cv2.putText(frame, final_game_text, (content_start_x, box_y + y_offset + 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (150, 255, 150), 2)
+
+            final_ai_text = f"AI: {final_ai_score:.0f}"
+            cv2.putText(frame, final_ai_text, (content_start_x, box_y + y_offset + 125),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (150, 200, 255), 2)
+
+        # Explanation - centered at bottom
+        explanation = "Game=Real | AI=Training"
+        exp_size = cv2.getTextSize(
+            explanation, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+        exp_x = box_x + (box_width - exp_size[0]) // 2
+        cv2.putText(frame, explanation, (exp_x, box_y + box_height - 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+
+    def create_merged_video(self, output_filename='moonlander_progression.mp4', max_models=None):
+        """Create the merged video with all models"""
+        models = self.discover_and_sort_models()
+
+        if not models:
+            print("❌ No models found!")
+            return None
+
+        if max_models:
+            models = models[:max_models]
+
+        print(f"🎬 Creating merged video with {len(models)} models")
 
         # Setup video writer
-        first_frames = self.record_model(model_files[0])
-        if not first_frames:
-            return
+        game_width, game_height = self.resolution
+        total_height = game_height + self.overlay_height
 
-        height, width = first_frames[0].shape[:2]
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_name, fourcc, self.fps, (width, height))
+        output_path = os.path.join(self.output_folder, output_filename)
+        out = cv2.VideoWriter(output_path, fourcc, self.fps,
+                              (game_width, total_height))
 
-        # Write all models
-        for model_path in model_files:
-            frames = self.record_model(model_path)
-            if frames:
-                # Apply speed by skipping frames
-                skip = int(self.speed_multiplier)
-                for i in range(0, len(frames), skip):
-                    out.write(frames[i])
+        for i, model_info in enumerate(models):
+            print(
+                f"📹 Processing {i+1}/{len(models)}: {model_info['filename']}")
+
+            # Record episode
+            episode_data = self.record_model_episode(model_info, seed=42+i)
+            if not episode_data:
+                continue
+
+            # Process frames
+            for frame_idx, frame in enumerate(episode_data['frames']):
+                # Skip frames for speed
+                if frame_idx % int(self.speed_multiplier) != 0:
+                    continue
+
+                # Resize frame
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                frame = cv2.resize(frame, self.resolution)
+
+                # Calculate current scores (proportional to frame progress)
+                progress = frame_idx / len(episode_data['frames'])
+                current_game_score = episode_data['game_score'] * progress
+                current_ai_score = episode_data['ai_score'] * progress
+
+                # Create frame with overlay
+                final_frame = np.zeros(
+                    (total_height, game_width, 3), dtype=np.uint8)
+                final_frame[:game_height] = frame
+
+                final_frame = self.create_overlay(
+                    final_frame, model_info, episode_data,
+                    current_game_score, current_ai_score
+                )
+
+                out.write(final_frame)
+
+            # Add transition pause
+            if i < len(models) - 1:  # Not the last model
+                for _ in range(self.fps // 2):  # 0.5 second pause
+                    out.write(final_frame)
 
         out.release()
-        print(f"\nVideo saved as {output_name}")
-        print(f"Speed: {self.speed_multiplier}x")
+
+        print(f"✅ Merged video created: {output_path}")
+        self.print_video_summary(models, output_path)
+
+        return output_path
+
+    def print_video_summary(self, models, output_path):
+        """Print comprehensive video summary"""
+        print(f"\n" + "="*60)
+        print("📊 VIDEO CREATION SUMMARY")
+        print("="*60)
+        print(f"📁 Output: {output_path}")
+        print(f"🎬 Models included: {len(models)}")
+        print(f"⚡ Speed: {self.speed_multiplier}x")
+        print(
+            f"📐 Resolution: {self.resolution[0]}x{self.resolution[1] + self.overlay_height}")
+        print(f"🎯 Frame rate: {self.fps} FPS")
+
+        print(f"\n📋 Models showcased:")
+        for i, model in enumerate(models, 1):
+            print(f"  {i:2d}. {self.get_display_name(model['filename'])}")
+
+        print(f"\n💡 Score Legend:")
+        print(f"   🎮 Game Score: Original lunar lander scoring (-100 to +300)")
+        print(f"   🤖 AI Score: Enhanced training score (helps learning)")
+        print("="*60)
+
+    def create_side_by_side_comparison(self, model1_name, model2_name,
+                                       output_filename='comparison.mp4'):
+        """Create side-by-side comparison of two specific models"""
+        models = self.discover_and_sort_models()
+
+        model1 = next(
+            (m for m in models if model1_name in m['filename']), None)
+        model2 = next(
+            (m for m in models if model2_name in m['filename']), None)
+
+        if not model1 or not model2:
+            print("❌ One or both models not found!")
+            return None
+
+        print(
+            f"🆚 Creating comparison: {model1['filename']} vs {model2['filename']}")
+
+        # Record both episodes
+        episode1 = self.record_model_episode(model1)
+        episode2 = self.record_model_episode(model2)
+
+        if not episode1 or not episode2:
+            print("❌ Failed to record episodes")
+            return None
+
+        # Setup side-by-side video
+        game_width, game_height = self.resolution
+        total_width = game_width * 2
+        total_height = game_height + self.overlay_height
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        output_path = os.path.join(self.output_folder, output_filename)
+        out = cv2.VideoWriter(output_path, fourcc, self.fps,
+                              (total_width, total_height))
+
+        max_frames = max(len(episode1['frames']), len(episode2['frames']))
+
+        for i in range(max_frames):
+            canvas = np.zeros((total_height, total_width, 3), dtype=np.uint8)
+
+            # Left side (model1)
+            if i < len(episode1['frames']):
+                frame1 = cv2.cvtColor(episode1['frames'][i], cv2.COLOR_RGB2BGR)
+                frame1 = cv2.resize(frame1, self.resolution)
+                canvas[:game_height, :game_width] = frame1
+
+            # Right side (model2)
+            if i < len(episode2['frames']):
+                frame2 = cv2.cvtColor(episode2['frames'][i], cv2.COLOR_RGB2BGR)
+                frame2 = cv2.resize(frame2, self.resolution)
+                canvas[:game_height, game_width:] = frame2
+
+            # Add labels
+            cv2.putText(canvas, self.get_display_name(model1['filename']),
+                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+            cv2.putText(canvas, self.get_display_name(model2['filename']),
+                        (game_width + 20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2)
+
+            out.write(canvas)
+
+        out.release()
+        print(f"✅ Comparison video created: {output_path}")
+        return output_path
 
 
-# Simple usage
+def main():
+    """Main function with easy customization"""
+
+    # Create the merger
+    merger = ModelVideoMerger(
+        models_folder='model_to_video',  # Folder containing your models
+        output_folder='merged_videos'    # Where to save the final video
+    )
+
+    # Customize settings
+    merger.fps = 30
+    merger.speed_multiplier = 2.0  # 2x speed
+    merger.resolution = (1200, 900)  # Higher resolution
+
+    # CUSTOMIZE EXPLANATIONS HERE!
+    merger.model_explanations.update({
+        'your_model_name.pth': 'Your custom explanation here',
+        # Add more as needed...
+    })
+
+    print("🎬 MoonLander Model Video Merger")
+    print("="*50)
+
+    # Create the main progression video
+    video_path = merger.create_merged_video(
+        output_filename='moonlander_complete_progression.mp4',
+        max_models=10  # Limit to first 10 models, or None for all
+    )
+
+    # Optionally create a comparison video
+    # comparison_path = merger.create_side_by_side_comparison(
+    #     'checkpoint_0', 'best', 'before_vs_after.mp4'
+    # )
+
+    print(f"\n🎉 Video creation complete!")
+    if video_path:
+        print(f"📱 Ready to share: {video_path}")
+
+
 if __name__ == "__main__":
-    generator = SimpleVideoGenerator()
-
-    # Easy to customize
-    generator.speed_multiplier = 2.0  # Change speed here
-
-    # Edit descriptions here
-    generator.descriptions = {
-        'moonlander_best.pth': '🏆 Best Performance',
-        'moonlander_final.pth': '🎓 Final Model',
-        'moonlander_checkpoint_0.pth': '🎲 Random Agent',
-        'moonlander_checkpoint_5000.pth': '📈 Learning to Land',
-        'moonlander_checkpoint_10000.pth': '🚀 Getting Better',
-        'moonlander_checkpoint_15000.pth': '🎯 Good Control',
-        'moonlander_checkpoint_20000.pth': '⭐ Expert Level',
-    }
-
-    # Specify the folder containing models
-    generator.create_video('moonlander_showcase.mp4',
-                           models_folder='model_to_video')
+    main()
