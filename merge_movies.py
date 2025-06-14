@@ -192,8 +192,8 @@ def main():
         output_name='merged_video_hq.mp4',
         comments=["Episode 400: Basic Control",
                   "Episode 800: Improved control",
-                  "Episode 10000: Future improvements",
-                  "Episode 10800: Successful landings",
+                  "Episode 10000: Further Improvements",
+                  "Episode 10800: Successful Landings",
                   "Episode 24000: Learning to land quickly and successfully"],
         default_comment="Training in progress..."
     )
