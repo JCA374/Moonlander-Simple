@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lunar Lander DQN Architecture</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 1000px;
+            width: 100%;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2a5298;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 40px;
+            font-size: 1.2em;
+        }
+        
+        svg {
+            width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.3; }
+            50% { opacity: 0.8; }
+            100% { opacity: 0.3; }
+        }
+        
+        .flow-line {
+            animation: pulse 2s infinite;
+        }
+        
+        .key-info {
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+        }
+        
+        .key-info p {
+            margin: 10px 0;
+            font-size: 1.1em;
+        }
+        
+        .highlight {
+            color: #2a5298;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Neural Network Architecture</h1>
+        <p class="subtitle">Dueling Deep Q-Network (DQN)</p>
+        
+        <svg viewBox="0 0 800 400" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+                <filter id="shadow">
+                    <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+                    <feOffset dx="1" dy="1" result="offsetblur"/>
+                    <feComponentTransfer>
+                        <feFuncA type="linear" slope="0.3"/>
+                    </feComponentTransfer>
+                    <feMerge> 
+                        <feMergeNode/>
+                        <feMergeNode in="SourceGraphic"/> 
+                    </feMerge>
+                </filter>
+                
+                <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                    <polygon points="0 0, 10 3.5, 0 7" fill="#666" />
+                </marker>
+            </defs>
+            
+            <!-- Input Layer -->
+            <g transform="translate(50, 150)">
+                <rect x="0" y="0" width="100" height="100" rx="15" fill="#4CAF50" filter="url(#shadow)"/>
+                <text x="50" y="-15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Input</text>
+                <text x="50" y="50" text-anchor="middle" font-size="24" fill="white" font-weight="bold">8</text>
+                <text x="50" y="75" text-anchor="middle" font-size="12" fill="white">State</text>
+            </g>
+            
+            <!-- Hidden Layer 1 -->
+            <g transform="translate(200, 150)">
+                <rect x="0" y="0" width="100" height="100" rx="15" fill="#2196F3" filter="url(#shadow)"/>
+                <text x="50" y="-15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Hidden</text>
+                <text x="50" y="50" text-anchor="middle" font-size="24" fill="white" font-weight="bold">128</text>
+                <text x="50" y="75" text-anchor="middle" font-size="12" fill="white">ReLU</text>
+            </g>
+            
+            <!-- Hidden Layer 2 -->
+            <g transform="translate(350, 150)">
+                <rect x="0" y="0" width="100" height="100" rx="15" fill="#2196F3" filter="url(#shadow)"/>
+                <text x="50" y="-15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Hidden</text>
+                <text x="50" y="50" text-anchor="middle" font-size="24" fill="white" font-weight="bold">128</text>
+                <text x="50" y="75" text-anchor="middle" font-size="12" fill="white">ReLU</text>
+            </g>
+            
+            <!-- Dueling Split -->
+            <g transform="translate(500, 100)">
+                <!-- Value Stream -->
+                <rect x="0" y="0" width="100" height="80" rx="15" fill="#FF9800" filter="url(#shadow)"/>
+                <text x="50" y="-15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Value</text>
+                <text x="50" y="45" text-anchor="middle" font-size="20" fill="white" font-weight="bold">V(s)</text>
+                
+                <!-- Advantage Stream -->
+                <rect x="0" y="120" width="100" height="80" rx="15" fill="#9C27B0" filter="url(#shadow)"/>
+                <text x="50" y="235" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Advantage</text>
+                <text x="50" y="165" text-anchor="middle" font-size="20" fill="white" font-weight="bold">A(s,a)</text>
+            </g>
+            
+            <!-- Output Layer -->
+            <g transform="translate(650, 150)">
+                <rect x="0" y="0" width="100" height="100" rx="15" fill="#E91E63" filter="url(#shadow)"/>
+                <text x="50" y="-15" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Output</text>
+                <text x="50" y="50" text-anchor="middle" font-size="24" fill="white" font-weight="bold">4</text>
+                <text x="50" y="75" text-anchor="middle" font-size="12" fill="white">Actions</text>
+            </g>
+            
+            <!-- Connections -->
+            <g stroke="#666" stroke-width="3" fill="none" marker-end="url(#arrowhead)">
+                <!-- Input to Hidden 1 -->
+                <line x1="150" y1="200" x2="190" y2="200" class="flow-line"/>
+                
+                <!-- Hidden 1 to Hidden 2 -->
+                <line x1="300" y1="200" x2="340" y2="200" class="flow-line"/>
+                
+                <!-- Hidden 2 to Dueling (split) -->
+                <path d="M 450 200 Q 480 200 490 140" class="flow-line"/>
+                <path d="M 450 200 Q 480 200 490 260" class="flow-line"/>
+                
+                <!-- Dueling to Output (merge) -->
+                <path d="M 600 140 Q 620 200 640 200" class="flow-line"/>
+                <path d="M 600 260 Q 620 200 640 200" class="flow-line"/>
+            </g>
+            
+            <!-- Labels for clarity -->
+            <text x="100" y="290" text-anchor="middle" font-size="11" fill="#666">Position</text>
+            <text x="100" y="305" text-anchor="middle" font-size="11" fill="#666">Velocity</text>
+            <text x="100" y="320" text-anchor="middle" font-size="11" fill="#666">Angle</text>
+            <text x="100" y="335" text-anchor="middle" font-size="11" fill="#666">Legs</text>
+            
+            <text x="700" y="290" text-anchor="middle" font-size="11" fill="#666">Nothing</text>
+            <text x="700" y="305" text-anchor="middle" font-size="11" fill="#666">Left</text>
+            <text x="700" y="320" text-anchor="middle" font-size="11" fill="#666">Main</text>
+            <text x="700" y="335" text-anchor="middle" font-size="11" fill="#666">Right</text>
+            
+            <!-- Formula -->
+            <text x="400" y="370" text-anchor="middle" font-size="14" fill="#333" font-weight="bold">
+                Q(s,a) = V(s) + A(s,a) - mean(A)
+            </text>
+        </svg>
+        
+        <div class="key-info">
+            <p><span class="highlight">Dueling Architecture:</span> Separates state value from action advantages</p>
+            <p><span class="highlight">Training:</span> 25,000 episodes with experience replay</p>
+            <p><span class="highlight">Result:</span> 100% landing success rate</p>
+            <p><span class="highlight">Training Time:</span> ~2 hours on CPU (4 threads)</p>
+        </div>
+    </div>
+</body>
+</html>
