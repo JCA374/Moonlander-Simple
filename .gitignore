@@ -26,6 +26,10 @@ MANIFEST
 *.pth
 *.pt
 
+# GA/numpy model files
+*.npy
+ga_models/
+
 # Logs and training data
 logs/
 *.log
