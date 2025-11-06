@@ -77,6 +77,8 @@ class CMAESOptimizer:
                 for _ in range(self.population_size)
             ]
             self.fitness_history = []
+            self.best_params_ever = initial_params.copy()
+            self.best_fitness_ever = -np.inf
 
     def ask(self) -> List[np.ndarray]:
         """
@@ -124,6 +126,11 @@ class CMAESOptimizer:
         sorted_indices = np.argsort(fitness_array)[::-1]
         sorted_population = [self.population[i] for i in sorted_indices]
         sorted_fitness = fitness_array[sorted_indices]
+
+        # Track best ever
+        if sorted_fitness[0] > self.best_fitness_ever:
+            self.best_fitness_ever = sorted_fitness[0]
+            self.best_params_ever = sorted_population[0].copy()
 
         # Elitism: keep top individuals
         new_population = sorted_population[:self.elite_size]
@@ -178,9 +185,8 @@ class CMAESOptimizer:
             fitness = -self.es.result.fbest  # Negate back to original scale
             return np.array(best), fitness
         else:
-            # For simple GA, we need to track best separately
-            # This is a limitation - would need to track best across generations
-            return self.population[0], None
+            # For simple GA, return tracked best
+            return self.best_params_ever, self.best_fitness_ever
 
     def should_stop(self) -> bool:
         """Check if optimization should stop."""
