@@ -1,6 +1,6 @@
 gymnasium[classic_control]==0.29.1
 gymnasium[box2d]
-torch==2.1.0
+torch>=2.5.1
 numpy==1.24.3
 matplotlib==3.7.2
 PyYAML==6.0.1
